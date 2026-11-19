@@ -1,0 +1,33 @@
+{
+  "name": "yerevan-drift-map",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "data": "node tools/fetch-data.mjs",
+    "build:map": "node tools/build-map.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "imagery": "node tools/fetch-imagery.mjs && node tools/fetch-imagery.mjs 19 500 public/map/aerial_hi.webp",
+    "build:landmarks": "node tools/build-landmarks.mjs",
+    "build:props": "node tools/build-props.mjs",
+    "data:far": "node tools/fetch-far.mjs",
+    "build:tiles": "node tools/build-tiles.mjs",
+    "build:all": "node tools/build-landmarks.mjs && node tools/build-map.mjs && node tools/build-tiles.mjs && node tools/build-props.mjs",
+    "build:textures": "node tools/build-textures.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "clipper-lib": "^6.4.2",
+    "earcut": "^3.2.4",
+    "meshoptimizer": "^1.3.0",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.35.5",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8"
+  }
+}

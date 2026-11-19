@@ -1,0 +1,546 @@
+{
+ "version": 1,
+ "sizes": [
+  512,
+  1024,
+  2048
+ ],
+ "license": "All PBR sets: CC0 1.0 (ambientCG.com). Procedural masks: generated here.",
+ "sets": {
+  "asphalt_fine": {
+   "id": "Asphalt025C",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024,
+    2048
+   ],
+   "avg": [
+    0.0248,
+    0.0241,
+    0.022
+   ],
+   "use": "asphalt (fine dark aggregate, close-up detail)"
+  },
+  "asphalt_road": {
+   "id": "Road012B",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 7.5,
+   "sizes": [
+    512,
+    1024,
+    2048
+   ],
+   "avg": [
+    0.0534,
+    0.0526,
+    0.0493
+   ],
+   "use": "asphalt (large-scale mottling, cracks and wear; blended over asphalt_fine)"
+  },
+  "asphalt_cracked": {
+   "id": "Asphalt026C",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 3,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.0325,
+    0.0314,
+    0.0279
+   ],
+   "use": "asphalt (heavily cracked variant)"
+  },
+  "asphalt_patch": {
+   "id": "Asphalt019",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 3,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.0438,
+    0.0434,
+    0.0418
+   ],
+   "use": "asphalt (patched / peeled variant)"
+  },
+  "roof_bitumen": {
+   "id": "Asphalt032",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1559,
+    0.1421,
+    0.1268
+   ],
+   "use": "flat roofs (bitumen / gravel)"
+  },
+  "sidewalk_slab": {
+   "id": "PavingStones006",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.6,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.2694,
+    0.279,
+    0.2678
+   ],
+   "use": "sidewalks (grey concrete slabs)"
+  },
+  "plaza_tuff": {
+   "id": "Tiles143",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.6971,
+    0.4589,
+    0.2706
+   ],
+   "use": "Republic Square plaza (beige/pink limestone slabs)"
+  },
+  "sett_basalt": {
+   "id": "PavingStones049",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.5,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.0984,
+    0.1042,
+    0.1045
+   ],
+   "use": "granite / basalt sett pavers"
+  },
+  "cobble": {
+   "id": "PavingStones142",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.5,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.2284,
+    0.196,
+    0.1184
+   ],
+   "use": "cobblestone"
+  },
+  "concrete_dark": {
+   "id": "Concrete030",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1269,
+    0.117,
+    0.1083
+   ],
+   "use": "walls, barriers, curbs"
+  },
+  "concrete_light": {
+   "id": "Concrete034",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.1,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.4827,
+    0.4827,
+    0.4827
+   ],
+   "use": "light concrete / smooth render"
+  },
+  "plaster_a": {
+   "id": "Plaster003",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.6811,
+    0.655,
+    0.6332
+   ],
+   "use": "wall render (clean, rough)"
+  },
+  "plaster_b": {
+   "id": "Plaster006",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.398,
+    0.3911,
+    0.3708
+   ],
+   "use": "wall render (weathered, patchy)"
+  },
+  "tuff_block_a": {
+   "id": "Bricks109A",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2.4,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.2577,
+    0.187,
+    0.104
+   ],
+   "use": "Yerevan tuff / limestone block masonry (orange)"
+  },
+  "tuff_block_b": {
+   "id": "Bricks112A",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2.4,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.303,
+    0.1989,
+    0.0972
+   ],
+   "use": "Yerevan tuff / limestone block masonry (large golden blocks)"
+  },
+  "brick_old": {
+   "id": "Bricks097",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.5,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.2474,
+    0.1624,
+    0.1014
+   ],
+   "use": "old red brick"
+  },
+  "brick_red": {
+   "id": "Bricks051",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.25,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.3912,
+    0.1666,
+    0.1199
+   ],
+   "use": "modern red brick"
+  },
+  "roof_clay": {
+   "id": "RoofingTiles012A",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2.9,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.3819,
+    0.1178,
+    0.062
+   ],
+   "use": "hipped clay-tile roofs"
+  },
+  "grass_short": {
+   "id": "Grass005",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.4,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1319,
+    0.2304,
+    0.0251
+   ],
+   "use": "lawns (short, bright)"
+  },
+  "grass_mixed": {
+   "id": "Grass004",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.4,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1195,
+    0.1529,
+    0.0308
+   ],
+   "use": "lawns (varied, darker)"
+  },
+  "grass_dry": {
+   "id": "Ground037",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2.1,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.3182,
+    0.2924,
+    0.1002
+   ],
+   "use": "dry grass / patchy earth"
+  },
+  "terrain_earth": {
+   "id": "Ground103",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1991,
+    0.1409,
+    0.0834
+   ],
+   "use": "generic terrain"
+  },
+  "dirt": {
+   "id": "Ground109",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2.8,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.2104,
+    0.1593,
+    0.0917
+   ],
+   "use": "dirt"
+  },
+  "gravel": {
+   "id": "Gravel043",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1.6,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1488,
+    0.1506,
+    0.1389
+   ],
+   "use": "fine gravel"
+  },
+  "sand": {
+   "id": "Ground091",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 2,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.4493,
+    0.3749,
+    0.2764
+   ],
+   "use": "sand / dust"
+  },
+  "metal_dark": {
+   "id": "Metal046B",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.0499,
+    0.0499,
+    0.0499
+   ],
+   "use": "painted dark metal (fences, rails)"
+  },
+  "metal_rust": {
+   "id": "Metal053C",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 1,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.3793,
+    0.2605,
+    0.1986
+   ],
+   "use": "rusty metal"
+  },
+  "wood": {
+   "id": "Wood066",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "pbr",
+   "scale": 0.4,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1027,
+    0.0345,
+    0.0068
+   ],
+   "use": "dark wood"
+  },
+  "decal_manhole": {
+   "id": "ManholeCover011",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "decal",
+   "scale": 1,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.1787,
+    0.1579,
+    0.1417
+   ],
+   "use": "square manhole / drain cover decal (one per cell, placed in shader)"
+  },
+  "decal_patch": {
+   "id": "AsphaltDamage001",
+   "source": "ambientCG",
+   "license": "CC0-1.0",
+   "kind": "decal",
+   "scale": 1.6,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0.2304,
+    0.2174,
+    0.2174
+   ],
+   "use": "asphalt repair patch decal"
+  },
+  "road_decals": {
+   "id": "procedural",
+   "source": "generated by tools/build-textures.mjs",
+   "license": "CC0-1.0",
+   "kind": "mask",
+   "scale": 6,
+   "sizes": [
+    512,
+    1024
+   ],
+   "avg": [
+    0,
+    0,
+    0
+   ],
+   "use": "RGB mask: R tyre-rubber streaks, G cracks, B oil/dirt stains. Tile 6 m, rotate by road direction."
+  }
+ },
+ "roadfield": {
+  "file": "roadfield.png",
+  "extent": 1100,
+  "size": 2048,
+  "note": "RG=cos/sin(2*dir) B=lateral 0..1 A=halfwidth/16m"
+ }
+}
