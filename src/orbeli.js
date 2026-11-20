@@ -46,11 +46,11 @@ export default async function (ctx) {
     g.fillStyle = '#7d928c'; g.fillRect(0, 0, W, Hh); ge.fillStyle = '#000'; ge.fillRect(0, 0, W, Hh);
     for (let r = 0; r < 5; r++) for (let k = 0; k < 4; k++) {
       const x0 = k * bw, y0 = r * bh, ground = r === 4, glassH = ground ? bh - 14 : bh - 36;
-      const gr = g.createLinearGradient(0, y0, 0, y0 + glassH); gr.addColorStop(0, '#5fa598'); gr.addColorStop(0.55, '#2f7569'); gr.addColorStop(1, '#194c47');
+      const gr = g.createLinearGradient(0, y0, 0, y0 + glassH); gr.addColorStop(0, '#8fd0c2'); gr.addColorStop(0.55, '#4f9d90'); gr.addColorStop(1, '#2d6b64');
       g.fillStyle = gr; g.fillRect(x0 + 3, y0 + (ground ? 10 : 4), bw - 6, glassH - 4);
       g.fillStyle = 'rgba(255,255,255,.13)'; g.beginPath(); g.moveTo(x0 + 10, y0 + 6); g.lineTo(x0 + 52, y0 + 6); g.lineTo(x0 + 14, y0 + glassH); g.lineTo(x0 + 4, y0 + glassH); g.closePath(); g.fill();        // sky reflection streak
       g.fillStyle = '#1b2224'; g.fillRect(x0, y0, 4, bh); g.fillRect(x0 + bw - 3, y0, 3, bh); g.fillRect(x0 + bw / 2 - 1, y0 + 4, 2, glassH - 4);                                                  // mullions
-      if (!ground) { g.fillStyle = '#8fa39d'; g.fillRect(x0, y0 + bh - 32, bw, 28); g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x0, y0 + bh - 5, bw, 2); }                                            // spandrel panel
+      if (!ground) { g.fillStyle = '#b3c6bf'; g.fillRect(x0, y0 + bh - 32, bw, 28); g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x0, y0 + bh - 5, bw, 2); }                                            // spandrel panel
       else if (k === 1 || k === 2) { g.fillStyle = '#10161a'; g.fillRect(x0 + (k === 1 ? bw / 2 : 4), y0 + 22, bw / 2 - 4, bh - 22); g.fillStyle = '#c9d2d0'; g.fillRect(x0 + (k === 1 ? bw / 2 : 4), y0 + 22, 3, bh - 22); ge.fillStyle = '#ffd9a0'; ge.globalAlpha = 0.8; ge.fillRect(x0 + (k === 1 ? bw / 2 + 4 : 8), y0 + 26, bw / 2 - 14, bh - 28); ge.globalAlpha = 1; }
       if (!ground && hash(r * 4 + k, 77) < 0.42) { ge.fillStyle = hash(k, r) < 0.5 ? '#ffe2b0' : '#d6ecff'; ge.globalAlpha = 0.5; ge.fillRect(x0 + 6, y0 + 6, bw - 12, glassH - 12); ge.globalAlpha = 1; }
     }

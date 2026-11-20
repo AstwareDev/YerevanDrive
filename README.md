@@ -60,6 +60,12 @@ The map now has a playable drift car (BMW G87 M2 widebody). It starts on the *Re
 `car/audio.js` cross-fades them by rpm and pitches them with `playbackRate`, and keeps the synthesized engine underneath so the pitch stays exact. Raw downloads are in `data/audio_raw/`.
 Parked cars are off by default (clear roads); `?cars=1` restores them and their colliders.
 
+## Gamepad / joystick
+Plug in a controller (Xbox / PlayStation / most USB pads; Chrome and Edge need one button press before the page sees it). Left stick steers, **RT** gas, **LT** brake/reverse, **A** handbrake, **X** clutch-kick, **LB/RB** gears, **Y** camera, **B** respawn (closes the map), D-pad = auto/manual, assists, lights, paint, **Start** map, **Back** free camera, **L3** cancel route, **R3** quick teleport. In the map the left stick pans and the triggers zoom. Rumble on tyre slip, rev limiter and impacts. Generic joysticks/wheels: X axis steers, Y axis gas/brake, buttons 0-3 = handbrake / kick / camera / respawn. Keyboard and pad can be used together. Code: `src/car/input.js`.
+
+## Sky
+`src/sky.js`: night / dusk (golden hour) / day, with procedural banded cloud decks that drift with the wind and are lit by the sun or moon (dark blue deck with a golden gap at dusk, city-glow violet at night). **T** cycles night -> dusk -> day; `uCover` in the sky material sets cloud amount.
+
 ## Multiplayer + deploying to Netlify
 Every browser tab is a player; everyone sees everyone's car (ghost cars, no player-vs-player collisions), name tags, an *ONLINE* list (click your own row to rename) and the other drivers on the minimap / map.
 `src/mp.js` sends the car state at 15 Hz over serverless WebRTC (Trystero; public Nostr relays are only used to find peers) plus a BroadcastChannel for tabs of the same browser, so **no backend is needed**. Default room is `public`; `?room=friends` makes a private one, `?mp=0` turns it off.

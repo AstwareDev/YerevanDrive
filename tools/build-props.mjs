@@ -273,13 +273,14 @@ const nOsm = trees.length;
       for (const side of [-1, 1]) for (let s = rr() * 6; s < L; s += 9 + rr() * 5) {
         const off = side * (10.2 + rr() * 2.2), x = a[0] + ux * s - uz * off, z = a[1] + uz * s + ux * off, rad = 3.6 + rr() * 1.8;
         if (at(occB, x, z) || at(occR, x, z) || at(occW, x, z) || crowded(x, z, 0.75, rad)) continue;
+        { const ss = (x + 1619.88) * 0.88952 + (z + 1800.71) * -0.4569, dd = -((x + 1619.88) * 0.4569 + (z + 1800.71) * 0.88952); if (ss > 44 && ss < 60 && dd > -16 && dd < 4) continue; }     // keep the BISA entrance visible
         trees.push([x, z, rr() < 0.8 ? 0 : 1, rad, 11 + rr() * 5, rr() * 6.283, rr()]); addGrid(x, z, rad * 0.7); nRow++;
       }
     }
   }
   // BISA front yard (strip frame from tools/build-orbeli.mjs: B, u, n; s along the frontage, d into the block): big trees on both sides of the entrance
   const OB = [-1619.88, -1800.71], Ou = [0.88952, -0.4569], On = [0.4569, 0.88952];
-  for (const [ss, dd, rad, ht] of [[43.6, 1.4, 4.8, 14], [57.6, 1.2, 4.4, 13], [36.5, 1.0, 5.2, 15.5]]) {
+  for (const [ss, dd, rad, ht] of [[43.6, 1.4, 4.8, 14], [61.2, 1.2, 4.4, 13], [36.5, 1.0, 5.2, 15.5]]) {
     const x = OB[0] + Ou[0] * ss - On[0] * dd, z = OB[1] + Ou[1] * ss - On[1] * dd; trees.push([x, z, 0, rad, ht, rr() * 6.283, rr()]); addGrid(x, z, rad * 0.7); nRow++;
   }
   console.log('orbeli street trees', nRow);

@@ -69,6 +69,8 @@ export default async function car(ctx) {
   const skids = createSkids({ scene, ground }), smoke = createSmoke({ scene }), sparks = createSparks({ scene });
   const audio = createAudio(), hud = createHud(), cam = createCarCamera(camera);
   const input = createInput({
+    pad: (name, ok) => hud.toast(ok ? 'GAMEPAD CONNECTED' : 'GAMEPAD DISCONNECTED', 1.6),
+    uiOpen: () => !!drive.uiLock,
     key(code) {
       audio.resume();
       if (code === 'Tab') { drive.set(!drive.active); return; }
@@ -131,6 +133,7 @@ export default async function car(ctx) {
 
   function update(dt, camera_, time) {
     const active = drive.active;
+    input.pollPad();
     hud.show(active);
     if (active) {
       input.update(dt, vehicle, true, !!drive.uiLock);
@@ -162,21 +165,23 @@ export default async function car(ctx) {
     crashed = false;
     if (vehicle.impact > 1.0) (window.__impacts ??= []).push([+totalTime.toFixed(2), +vehicle.impact.toFixed(1), +vehicle.t.kmh.toFixed(0), +vehicle.pos.x.toFixed(0), +vehicle.pos.z.toFixed(0)]);
     if (vehicle.impact > 2.2) { audio.impact(vehicle.impact); cam.impact(vehicle.impact); sparks.burst(vehicle.pos.x, vehicle.pos.y, vehicle.pos.z, vehicle.vel.x, 0, vehicle.vel.z, Math.min(24, Math.round(vehicle.impact * 2.2))); if (vehicle.impact > 5) crashed = true; }
+    if (input.pad.connected) input.rumble(Math.min(1, vehicle.impact / 8), 0);
     vehicle.impact = 0;
     if (vehicle.scrape > 2e4) { lastSpark -= dt; if (lastSpark <= 0) { sparks.burst(vehicle.pos.x, ground.y(vehicle.pos.x, vehicle.pos.z) + 0.1, vehicle.pos.z, vehicle.vel.x, 0, vehicle.vel.z, 3); lastSpark = 0.05; } }
 
     // tyre effects
-    const sp = vehicle.t.speed; let slipF = 0, slipR = 0, hard = 0, nc = 0;
+    const sp = vehicle.t.speed; let slipF = 0, slipR = 0, hard = 0, nc = 0, slipRum = 0;
     for (let i = 0; i < 4; i++) {
       const w = vehicle.wheels[i]; if (!w.contact) { skids.feed(i, 0, 0, 0, 0); continue; }
       const fast = Math.min(1, Math.max(0, (sp - 8) / 12)), inten = Math.min(1, Math.max(0, (w.slipV - 2.2) / 5.5)) * Math.min(1, Math.max(0, (w.slip - 0.9) / 0.6)) * fast * fast * (3 - 2 * fast);   // smoke / marks only at speed
-      skids.feed(i, w.pcx, w.pcz, inten, w.surf);
+      skids.feed(i, w.pcx, w.pcz, inten, w.surf); if (inten > slipRum) slipRum = inten;
       const spinning = Math.abs(w.slipX) > 0.35;
       smoke.emit(i, dt, w.pcx, w.pcy, w.pcz, vehicle.vel.x, vehicle.vel.z, inten * (w.surf === 0 ? 0.5 : 1) * (0.45 + 0.55 * Math.min(1, (sp + Math.abs(w.omega) * 0.34) / 14)), spinning);
       if (w.front) slipF = Math.max(slipF, w.slip); else slipR = Math.max(slipR, w.slip);
       hard += (w.surf === 1 || w.surf === 2 || w.surf === 3) ? 1 : 0; nc++;
     }
     hard = nc ? hard / nc : 0;
+    if (input.pad.connected && (slipRum > 0.05 || vehicle.limiter)) input.rumble(0, Math.min(1, slipRum * 0.6 + (vehicle.limiter ? 0.25 : 0)));
     skids.update(); smoke.update(dt, rp, day); sparks.update(dt, ground);
     smoke.setScale(renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360)));
     sparks.setScale(renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360)));
@@ -217,6 +222,7 @@ export default async function car(ctx) {
     };
     api.setPaint(pi); return api;
   }
+  drive.pad = input.pad;       // gamepad state for the map (stick pans, triggers zoom)
   drive.car = {
     vehicle, ground, hud, makeRemote, paint: () => paintIdx, paintHex: PAINTS.map(p => p[1]), lights: () => lightsOn,
     teleport: (x, z, heading) => respawn({ x, z, y: null, heading }),

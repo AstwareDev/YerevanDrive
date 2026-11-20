@@ -174,17 +174,19 @@ const C = (h) => new THREE.Color(h);
 const DAY = { fog: C(0xa9bfd9), hemiSky: C(0xbcd2ff), hemiGround: C(0x6a5f52), key: C(0xfff0d6) };
 const NIGHT = { fog: FOG.clone(), hemiSky: C(0x4a5c92), hemiGround: C(0x1a1422), key: C(0x8aa6e0) };
 const sunDir = new THREE.Vector3(-0.55, 0.62, 0.55).normalize();
+const DUSK_FOG = C(0x8a6f7e), DUSK_KEY = C(0xffa65c), DUSK_SUN = new THREE.Vector3(-0.8, 0.3, 0.6).normalize();       // golden hour (T cycles night -> dusk -> day)
 const emissiveMats = ['facade', 'facade_tuff', 'facade_modern', 'facade_house', 'shop'].map(k => ({ m: M[k], base: M[k].emissiveIntensity }));
 const neonBase = M.neon.color.r;
 let todTarget = 0;
 function applyTod(d) {
   tod.day = d; tod.night = 1 - d;
   const n = tod.night;
-  sky.material.uniforms.uDay.value = d;
-  scene.fog.color.copy(NIGHT.fog).lerp(DAY.fog, d); scene.background = scene.fog.color; scene.fog.density = FOG_NIGHT + (FOG_DAY - FOG_NIGHT) * d;
+  const dusk = Math.max(0, 1 - Math.abs(2 * d - 1));            // 0 at night and day, 1 at golden hour (d = 0.5)
+  sky.material.uniforms.uDay.value = d; sky.material.uniforms.uDusk.value = dusk;
+  scene.fog.color.copy(NIGHT.fog).lerp(DAY.fog, d).lerp(DUSK_FOG, dusk * 0.8); scene.background = scene.fog.color; scene.fog.density = FOG_NIGHT + (FOG_DAY - FOG_NIGHT) * d;
   hemi.color.copy(NIGHT.hemiSky).lerp(DAY.hemiSky, d); hemi.groundColor.copy(NIGHT.hemiGround).lerp(DAY.hemiGround, d); hemi.intensity = 1.3 + (1.25 - 1.3) * d;
-  moon.color.copy(NIGHT.key).lerp(DAY.key, d); moon.intensity = 1.3 + (3.3 - 1.3) * d;
-  moonDir.set(-0.45, 0.5, -0.7).lerp(sunDir, d).normalize();
+  moon.color.copy(NIGHT.key).lerp(DAY.key, d).lerp(DUSK_KEY, dusk * 0.85); moon.intensity = 1.3 + (3.3 - 1.3) * d;
+  moonDir.set(-0.45, 0.5, -0.7).lerp(sunDir, d).lerp(DUSK_SUN, dusk * 0.8).normalize();
   scene.environmentIntensity = 0.55 + (0.25 - 0.55) * d;
   renderer.toneMappingExposure = 1.0 + (0.85 - 1.0) * d;
   bloom.strength = 0.5 + (0.12 - 0.5) * d; bloom.threshold = 1.05 + 0.4 * d;
@@ -248,7 +250,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR' && mode !== 'drive') wetness.value = wetness.value > 0.5 ? 0.0 : 1.0;
   if (e.code === 'KeyH') $('hud').classList.toggle('hidden');
   if (e.code === 'KeyO' && mode === 'drive') wetness.value = wetness.value > 0.5 ? 0.0 : 1.0;
-  if (e.code === 'KeyT') todTarget = todTarget > 0.5 ? 0 : 1;
+  if (e.code === 'KeyT') todTarget = todTarget < 0.25 ? 0.5 : todTarget < 0.75 ? 1 : 0;      // night -> dusk -> day
 });
 addEventListener('keyup', e => keys.delete(e.code), true);
 renderer.domElement.addEventListener('pointerdown', e => { if (mode === 'fly') { dragging = true; renderer.domElement.setPointerCapture(e.pointerId); } });
@@ -300,7 +302,7 @@ renderer.setAnimationLoop(() => {
   { const q = 140 * 2 / 2048; moon.target.position.set(Math.round(focus.x / q) * q, focus.y, Math.round(focus.z / q) * q); moon.position.copy(moon.target.position).addScaledVector(moonDir, 400); }
   governor.update(dt);
   streamer.update(camera.position);
-  sky.position.copy(camera.position);
+  sky.position.copy(camera.position); sky.material.uniforms.uTime.value = clock.elapsedTime;
   if (clock.elapsedTime - statT > 1) { statT = clock.elapsedTime; $('stats').textContent = `${(streamer.stat.tris / 1e6).toFixed(2)}M tris · ${streamer.stat.shown} tiles shown · ${streamer.stat.loaded} loaded · q=${quality.level}${governor.level ? '-' + governor.level : ''}`; }
   if (ssr) ssr.update(clock.elapsedTime, scene.fog.color, tod.day);
   // EffectComposer never resets its ping-pong pair: with an odd number of swapping passes (NaN guard + SSR + Output = 3) the scene alternated

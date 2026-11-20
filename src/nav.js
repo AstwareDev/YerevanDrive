@@ -183,7 +183,8 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
   });
   ui.map.addEventListener('keyup', e => e.stopPropagation());
   addEventListener('keydown', e => {
-    if (open || e.ctrlKey || e.metaKey || e.altKey || e.target?.closest?.('input,textarea')) return;
+    if (open) { if (e.code === 'Escape' || e.code === 'KeyF') setOpen(false); else if (e.code === 'KeyX' && !e.target?.closest?.('input,textarea')) { clearRoute('Route cancelled'); showCard(); } return; }      // (events from the search box are stopped at the overlay; these come from the gamepad / body)
+    if (e.ctrlKey || e.metaKey || e.altKey || e.target?.closest?.('input,textarea')) return;
     if (e.code === 'KeyF' || e.code === 'Slash') { e.preventDefault(); setOpen(true); }
     else if (e.code === 'KeyX' && route) clearRoute('Route cancelled');
   });
@@ -235,6 +236,8 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
     }
     // full map
     if (open) {
+      const pd = drive.pad;                                    // gamepad: left stick pans, RT zooms in, LT zooms out
+      if (pd?.connected && (pd.lx || pd.ly || pd.rt || pd.lt)) { fly = null; view.cx += pd.lx * view.mpp * 520 * dt; view.cz += pd.ly * view.mpp * 520 * dt; view.mpp = Math.max(0.3, Math.min(26, view.mpp * Math.exp((pd.lt - pd.rt) * 1.8 * dt))); dirty = true; }
       if (fly) { fly.t += dt; const k = Math.min(1, fly.t / fly.dur), e = k * k * (3 - 2 * k); view.cx = fly.a.cx + (fly.b.cx - fly.a.cx) * e; view.cz = fly.a.cz + (fly.b.cz - fly.a.cz) * e; view.mpp = fly.a.mpp * Math.pow(fly.b.mpp / fly.a.mpp, e); if (k >= 1) fly = null; dirty = true; }
       if ((drawT -= dt) <= 0) { drawT = 0.3; dirty = true; }
       if (dirty) { dirty = false; drawMap(); }
