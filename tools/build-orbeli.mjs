@@ -58,7 +58,7 @@ const SPECIAL = {
   796464186: { style: 'tower', pal: '#e6e1d6', topArch: 1, name: 'Orbeli 67/2' },
   82681523: { style: 'stalin', pal: '#8f6a68', roof: 'flat', gf: 'mixed', name: 'Orbeli 12' },
 };
-function selectBlocks(street, lines, { maxD = 75, malls = false, xmax = XMAX } = {}) {
+function selectBlocks(street, lines, { maxD = 75, malls = false, xmax = XMAX, zmax = 1e9 } = {}) {
   const nearestOnRoad = (x, z) => { let best = { d: 1e9, p: null }; for (const pl of lines) for (let i = 1; i < pl.length; i++) { const [ax, az] = pl[i - 1], [bx, bz] = pl[i], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1; const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2)), px = ax + dx * t, pz = az + dz * t, d = Math.hypot(x - px, z - pz); if (d < best.d) best = { d, p: [px, pz] }; } return best; };
   for (const e of osm.elements) {
     if (e.type !== 'way' || !e.geometry || !e.tags?.building || e.id === 82662788 || seen.has(e.id)) continue;
@@ -70,7 +70,7 @@ function selectBlocks(street, lines, { maxD = 75, malls = false, xmax = XMAX } =
     if (!sp && !isMall && !isApt) continue;
     if (A < 0) ring.reverse();                                   // counter-clockwise in (x, z): outward normal of edge (dx, dz) is (dz, -dx)
     const c = ring.reduce((s, p) => [s[0] + p[0] / ring.length, s[1] + p[1] / ring.length], [0, 0]);
-    if (c[0] > xmax) continue;
+    if (c[0] > xmax || c[1] > zmax) continue;
     const nr = nearestOnRoad(c[0], c[1]); if (nr.d > (isMall ? 130 : sp ? 120 : maxD)) continue;
     const front = ring.map((p, i) => { const q = ring[(i + 1) % ring.length], dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz); if (L < 8) return 0; const m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], n = nearestOnRoad(m[0], m[1]); if (n.d > 110 || n.d < 1) return 0; const vx = n.p[0] - m[0], vz = n.p[1] - m[1]; return (dz * vx - dx * vz) / (L * n.d) > 0.55 ? 1 : 0; });
     lv = Math.max(lv, sp ? 3 : 1);
@@ -78,6 +78,10 @@ function selectBlocks(street, lines, { maxD = 75, malls = false, xmax = XMAX } =
     let style, pal, roof = t['roof:shape'] === 'hipped' || t['roof:shape'] === 'gabled' ? 'hipped' : t['roof:shape'] === 'flat' ? 'flat' : null, gf;
     if (isMall && !sp) { style = 'mall'; pal = street === 'k' ? '#3a6fb0' : '#c9c4ba'; roof = 'flat'; gf = 'shops'; }
     else if (lv >= 9) { style = 'tower'; pal = pick(e.id, street === 'k' ? ['#9c8784', '#aba7a1', '#a39088', '#b2aead'] : ['#8e817c', '#a08c88', '#9c8784']); roof = 'flat'; gf = nr.d < 30 ? 'mixed' : 'res'; }
+    else if (street === 't') {                                  // Tigran Mets Ave: mixed Soviet 5-9 storey tuff / panel blocks, flat roofs, shops along the avenue
+      style = 'stalin'; roof ??= 'flat'; gf = nr.d < 34 ? 'shops' : 'res';
+      pal = pick(e.id, ['#b3a08a', '#a8957f', '#c0b4a2', '#9a8f86', '#b8896c', '#a67f6e']);
+    }
     else if (street === 'k') {                                  // Komitas: Stalin-era tuff, hipped sheet-metal roofs, continuous glass shopfronts
       style = 'stalin'; roof ??= lv <= 7 ? 'hipped' : 'flat'; gf = nr.d < 34 ? 'shops' : 'res';
       if (c[0] < -1490) pal = c[1] > -2520 + (c[0] + 1797) * -0.5 ? '#7d4c44' : '#9c8580';     // west boulevard: south row red-brown, north row mauve-beige
@@ -94,10 +98,11 @@ function selectBlocks(street, lines, { maxD = 75, malls = false, xmax = XMAX } =
 }
 const toLines = rs => rs.map(r => { const p = []; for (let i = 0; i < r.length; i += 2) p.push([r[i], r[i + 1]]); return p; });
 const streetLines = re => { const out = []; for (const e of osm.elements) { if (e.type !== 'way' || !e.geometry || !e.tags?.highway) continue; if (!re.test(e.tags['name:en'] || '')) continue; out.push(lineOf(e)); } return out; };
-const orbeliLines = streetLines(/orbeli/i), komitasLines = streetLines(/komitas avenue/i);
+const orbeliLines = streetLines(/orbeli/i), komitasLines = streetLines(/komitas avenue/i), tigranLines = streetLines(/^Tigran Mets avenue$/i);
 for (const l of komitasLines) allRoads.push(l.flatMap(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]));
 selectBlocks('o', orbeliLines, { maxD: 70 });
 selectBlocks('k', komitasLines, { maxD: 78, malls: true });
+selectBlocks('t', tigranLines, { maxD: 75, malls: true, zmax: 1010 });   // only inside the full-detail region (REGION.z1 = 1024): outside it the far tiles still draw the OSM boxes
 console.log('styles:', JSON.stringify(blocks.reduce((m, b) => (m[b.street + ':' + b.style] = (m[b.street + ':' + b.style] || 0) + 1, m), {})));
 // zebra crossings (footway=crossing ways) that cross either street, and junction points (where other roads meet Orbeli: gaps in the retaining walls)
 const near = (x, z, lines, d) => { for (const pl of lines) for (let i = 1; i < pl.length; i++) { const [ax, az] = pl[i - 1], [bx, bz] = pl[i], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2)); if (Math.hypot(x - ax - dx * t, z - az - dz * t) < d) return true; } return false; };
@@ -110,8 +115,9 @@ for (const e of osm.elements) {
 }
 console.log('crossings', crossings.length, 'junctions', junctions.length);
 const out = { v: 2, blocks, crossings, junctions, strip: { B: B.map(v => Math.round(v * 100) / 100), u: u.map(v => Math.round(v * 1e5) / 1e5), n: n.map(v => Math.round(v * 1e5) / 1e5), len: Math.round(L * 100) / 100, depth: Math.round(depth * 100) / 100 }, roads: allRoads,
+  tigran: tigranLines.map(l => l.flatMap(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10])),
   komitas: komitasLines.map(l => l.flatMap(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10])), orbeli: orbeliLines.map(l => l.flatMap(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10])) };
 fs.writeFileSync('public/map/orbeli.json', JSON.stringify(out));
 fs.writeFileSync('data/orbeli-skip.json', JSON.stringify({ ids: blocks.map(b => b.id) }));   // merged into data/landmark-skip.json by tools/build-landmarks.mjs
-console.log('blocks:', blocks.length, ' orbeli', blocks.filter(b => b.street === 'o').length, ' komitas', blocks.filter(b => b.street === 'k').length, ' special', blocks.filter(b => b.name).map(b => b.name).join(', '));
+console.log('blocks:', blocks.length, ' orbeli', blocks.filter(b => b.street === 'o').length, ' komitas', blocks.filter(b => b.street === 'k').length, ' tigran', blocks.filter(b => b.street === 't').length, ' special', blocks.filter(b => b.name).map(b => b.name).join(', '));
 console.log(JSON.stringify(out.strip), 'road polylines', roads.length);
