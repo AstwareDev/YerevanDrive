@@ -2,7 +2,9 @@
 // Used to tune src/car/vehicle.js without a browser. Prints a time series of speed / gear / body slip angle / yaw rate / steering.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { Vehicle, CAR } from '../src/car/vehicle.js';
+import { Vehicle, CAR, applyProfile } from '../src/car/vehicle.js';
+// car under test: CAR=<bmw_m2|mclaren_p1|countach> node tools/sim-car.mjs <scenario>   (profiles in src/car/profiles.js)
+applyProfile(process.env.CAR ?? 'bmw_m2'); console.log('car', process.env.CAR ?? 'bmw_m2', 'mass', CAR.mass);
 
 await RAPIER.init();
 const DT = 1 / 120;

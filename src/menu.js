@@ -49,6 +49,7 @@ body.yd-spec #hud,body.yd-play #hud{display:none!important}
 #yd .cards{display:grid;gap:8px}
 #yd .card{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.35)}
 #yd .card.on{border-color:#fff;background:rgba(255,255,255,.1)}#yd .card.lock{opacity:.35;cursor:default}
+#yd .card small{display:block;margin-top:3px;font-size:11px;letter-spacing:.06em;opacity:.55}
 #yd .card b{font:800 15px system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase}#yd .card span{font-size:11px;letter-spacing:.16em;text-transform:uppercase;opacity:.6}
 #yd .row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.12)}
 #yd .row>label{font:700 13px system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase}
@@ -232,7 +233,8 @@ export default async function ({ THREE, camera, drive }) {
   // ------------------------------------------------------------------ garage
   function renderGarage() {
     const c = cars(); if (!c) return;
-    $('g-cars').innerHTML = `<div class="card on"><b>BMW G87 M2</b><span>Selected</span></div><div class="card lock"><b>More cars</b><span>Soon</span></div>`;
+    $('g-cars').innerHTML = c.cars.map(k => `<div class="card${k.id === c.carId() ? ' on' : ''}" data-id="${k.id}"><div><b>${esc(k.name)}</b><small>${esc(k.sub)}</small></div><span>${k.id === c.carId() ? 'Selected' : 'Select'}</span></div>`).join('');
+    [...$('g-cars').children].forEach(n => n.onclick = async () => { if (n.dataset.id === c.carId()) return; n.querySelector('span').textContent = 'Loading…'; await c.setCar(n.dataset.id); LS.set('yd.car', c.carId()); renderGarage(); });
     const cur = c.paint();
     $('g-paint').innerHTML = c.paints.map((p, i) => `<div class="sw${i === cur ? ' on' : ''}" data-i="${i}" title="${esc(p.name)}" style="background:${hex6(p.hex === 0x07080b ? 0x15161a : p.hex)}"></div>`).join('');
     $('g-pname').textContent = c.paints[cur].name;

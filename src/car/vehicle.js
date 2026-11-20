@@ -5,20 +5,17 @@
 // Frame: x = car's left (when facing +z), y up, z forward. Body origin = centre of mass.
 import * as THREE from 'three';
 
-export const CAR = {
-  mass: 1650, hCOM: 0.505, zCOM: 0.10, inertia: { x: 2500, y: 3100, z: 750 },
-  R: 0.34, Iw: 1.5, Ie: 0.22,
-  hpY: -0.045,                                   // suspension hard-point height relative to COM
-  dFree: 0.22, dRest: 0.12,                      // hard-point -> wheel-centre distance at full droop / at rest
-  axleF: { x: 0.86, z: 1.444 }, axleR: { x: 0.875, z: -1.305 },
-  kF: 41500, kR: 39500, cbF: 3200, crF: 5200, cbR: 3000, crR: 4800, arbF: 23000, arbR: 15000,
-  muF: 1.18, muR: 1.04, kxPk: 0.14, syPkF: 0.15, syPkR: 0.17,
-  idle: 950, redline: 7200,
-  ratios: [4.11, 2.32, 1.61, 1.23, 1.0, 0.85], rev: 3.6, final: 3.46, eta: 0.92,
-  torque: [[0, 0], [900, 200], [1500, 330], [2000, 410], [3000, 540], [4500, 550], [5500, 550], [6300, 505], [7000, 445], [7600, 380]],
-  cdA: 0.78, clA: 0.16,
-  brakeF: 2700, brakeR: 1500, handbrake: 4800,
-};
+import { CAR_PROFILES, DEFAULT_CAR, PHYS_DEFAULTS } from './profiles.js';
+/** the active car's parameters (mutated in place by applyProfile so every module keeps one live reference) */
+export const CAR = {};
+export function applyProfile(id) {
+  const p = CAR_PROFILES[id] ?? CAR_PROFILES[DEFAULT_CAR];
+  for (const k of Object.keys(CAR)) delete CAR[k];
+  Object.assign(CAR, PHYS_DEFAULTS, p.phys);
+  if (CAR.hpY === undefined) CAR.hpY = CAR.R - CAR.hCOM + CAR.dRest;       // wheel centre sits at y = R when the suspension is at its rest height
+  return p;
+}
+applyProfile(DEFAULT_CAR);
 const MF_C = 1.45, MF_B = Math.tan(Math.PI / (2 * MF_C));
 const sat = (x, a, b) => Math.max(a, Math.min(b, x));
 const smooth = (x, a, b) => { const t = sat((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -44,19 +41,7 @@ export class Vehicle {
   constructor({ RAPIER, world, ground }) {
     this.RAPIER = RAPIER; this.world = world; this.ground = ground;
     const bd = RAPIER.RigidBodyDesc.dynamic().setCanSleep(false).setCcdEnabled(true).setLinearDamping(0).setAngularDamping(0.05);
-    this.body = world.createRigidBody(bd);
-    // chassis box (collision only; mass properties are set explicitly)
-    world.createCollider(RAPIER.ColliderDesc.cuboid(0.98, 0.42, 2.18).setTranslation(0, 0.1, -0.1).setDensity(0).setFriction(0.25).setRestitution(0.12), this.body);
-    world.createCollider(RAPIER.ColliderDesc.cuboid(0.8, 0.28, 1.05).setTranslation(0, 0.62, -0.25).setDensity(0).setFriction(0.2).setRestitution(0.1), this.body);   // cabin
-    this.body.setAdditionalMassProperties(CAR.mass, { x: 0, y: 0, z: 0 }, CAR.inertia, { x: 0, y: 0, z: 0, w: 1 }, true);
-    const mk = (key, ax, left, front) => {
-      const a = front ? CAR.axleF : CAR.axleR, x = (left ? 1 : -1) * a.x;
-      return { key, front, left, x, z: a.z, hp: new THREE.Vector3(x, CAR.hpY, a.z - CAR.zCOM),
-        k: front ? CAR.kF : CAR.kR, cb: front ? CAR.cbF : CAR.cbR, cr: front ? CAR.crF : CAR.crR,
-        mu: front ? CAR.muF : CAR.muR, kxPk: CAR.kxPk, syPk: front ? CAR.syPkF : CAR.syPkR,
-        omega: 0, d: CAR.dRest, c: 0, steer: 0, spin: 0, contact: false, fz: 0, sy: 0, slip: 0, slipX: 0, slipY: 0, surf: 1, pcx: 0, pcy: 0, pcz: 0, vx: 0, vy: 0, fx: 0, fy: 0 };
-    };
-    this.wheels = [mk('FL', 0, true, true), mk('FR', 0, false, true), mk('RL', 0, true, false), mk('RR', 0, false, false)];
+    this.body = world.createRigidBody(bd); this.cols = [];
     this.input = { throttle: 0, brake: 0, steer: 0, handbrake: 0, kick: false, shiftUp: false, shiftDown: false };
     this.gear = 1; this.auto = true; this.rpm = CAR.idle; this.shiftT = 0; this.kickT = 0; this.boost = 0; this.limiter = false;
     this.steerWheel = 0; this.steerAssist = 0.95; this.abs = true; this.tcs = true;
@@ -64,10 +49,35 @@ export class Vehicle {
     this.impact = 0; this.flipT = 0; this.airT = 0; this.scrape = 0;
     this.prevPos = new THREE.Vector3(); this.prevQuat = new THREE.Quaternion(); this.pos = new THREE.Vector3(); this.quat = new THREE.Quaternion();
     this.vel = new THREE.Vector3(); this.up = new THREE.Vector3(0, 1, 0); this.fwd = new THREE.Vector3(0, 0, 1);
-    this.bumpPts = [[0.9, -0.40, 1.95], [-0.9, -0.40, 1.95], [0.9, -0.40, -1.95], [-0.9, -0.40, -1.95], [0, -0.32, 2.25], [0, -0.32, -2.25],
-      [0.8, 0.82, 0.9], [-0.8, 0.82, 0.9], [0.8, 0.82, -1.0], [-0.8, 0.82, -1.0]].map(p => new THREE.Vector3(...p));
     this.lastAccel = new THREE.Vector3(); this._lastV = new THREE.Vector3();
+    this.build();
   }
+
+  /** (re)creates everything that depends on the active CAR profile: collision boxes, mass properties, the four wheel corners and the belly / roof scrape points */
+  build() {
+    const { RAPIER, world, body } = this;
+    for (const c of this.cols) world.removeCollider(c, false);
+    const bx = CAR.box, cb = CAR.cabin;
+    this.cols = [
+      world.createCollider(RAPIER.ColliderDesc.cuboid(bx.hx, bx.hy, bx.hz).setTranslation(0, bx.oy, bx.oz).setDensity(0).setFriction(0.25).setRestitution(0.12), body),
+      world.createCollider(RAPIER.ColliderDesc.cuboid(cb.hx, cb.hy, cb.hz).setTranslation(0, cb.oy, cb.oz).setDensity(0).setFriction(0.2).setRestitution(0.1), body),   // cabin
+    ];
+    body.setAdditionalMassProperties(CAR.mass, { x: 0, y: 0, z: 0 }, CAR.inertia, { x: 0, y: 0, z: 0, w: 1 }, true);
+    const mk = (key, left, front) => {
+      const a = front ? CAR.axleF : CAR.axleR, x = (left ? 1 : -1) * a.x;
+      return { key, front, left, x, z: a.z, hp: new THREE.Vector3(x, CAR.hpY, a.z - CAR.zCOM),
+        k: front ? CAR.kF : CAR.kR, cb: front ? CAR.cbF : CAR.cbR, cr: front ? CAR.crF : CAR.crR,
+        mu: front ? CAR.muF : CAR.muR, kxPk: CAR.kxPk, syPk: front ? CAR.syPkF : CAR.syPkR,
+        omega: 0, d: CAR.dRest, c: 0, steer: 0, spin: 0, contact: false, fz: 0, sy: 0, slip: 0, slipX: 0, slipY: 0, surf: 1, pcx: 0, pcy: 0, pcz: 0, vx: 0, vy: 0, fx: 0, fy: 0 };
+    };
+    this.wheels = [mk('FL', true, true), mk('FR', false, true), mk('RL', true, false), mk('RR', false, false)];
+    const bz0 = bx.oz - bx.hz + 0.23, bz1 = bx.oz + bx.hz - 0.13, belly = bx.oy - bx.hy + 0.02, roofY = cb.oy + cb.hy - 0.08, bw = bx.hx - 0.08;
+    this.bumpPts = [[bw, belly, bz1], [-bw, belly, bz1], [bw, belly, bz0], [-bw, belly, bz0], [0, belly + 0.08, bx.oz + bx.hz + 0.07], [0, belly + 0.08, bx.oz - bx.hz - 0.07],
+      [cb.hx, roofY, cb.oz + cb.hz * 0.65], [-cb.hx, roofY, cb.oz + cb.hz * 0.65], [cb.hx, roofY, cb.oz - cb.hz * 0.8], [-cb.hx, roofY, cb.oz - cb.hz * 0.8]].map(p => new THREE.Vector3(...p));
+  }
+
+  /** switch to another garage car (profile id from src/car/profiles.js): rebuilds the rig; the caller respawns the car afterwards */
+  setProfile(id) { applyProfile(id); this.build(); this.rpm = CAR.idle; this.gear = 1; }
 
   reset(x, z, heading, y = null) {
     const g = this.ground.y(x, z), b = this.body;
@@ -118,15 +128,16 @@ export class Vehicle {
     const rpmCar = speed / R * Math.abs(gr) * 30 / Math.PI;     // what the rpm would be without wheelspin (used for shift decisions)
     if (this.shiftT > 0) this.shiftT -= dt;
     if (this.kickT > 0) this.kickT -= dt;
-    // gearbox
+    // gearbox (thresholds scale with the redline; they were tuned for 7200 rpm)
+    const kRL = CAR.redline / 7200, top = CAR.ratios.length;
     if (this.gear >= 1) {
       if (this.auto) {
         if (this.shiftT <= 0 && !input.handbrake) {
-          if (this.gear < 6 && rpmW > (this.kickT > 0 ? 7000 : 6500) && rpmCar > 4300 && thr > 0.2) { this.gear++; this.shiftT = 0.16; }
-          else if (this.gear > 1 && rpmCar < (thr > 0.85 ? 2500 : 2100)) { this.gear--; this.shiftT = 0.12; }
+          if (this.gear < top && rpmW > (this.kickT > 0 ? 7000 : 6500) * kRL && rpmCar > 4300 * kRL && thr > 0.2) { this.gear++; this.shiftT = 0.16; }
+          else if (this.gear > 1 && rpmCar < (thr > 0.85 ? 2500 : 2100) * kRL) { this.gear--; this.shiftT = 0.12; }
         }
       }
-      if (input.shiftUp && this.gear < 6 && this.shiftT <= 0) { this.gear++; this.shiftT = 0.16; }
+      if (input.shiftUp && this.gear < top && this.shiftT <= 0) { this.gear++; this.shiftT = 0.16; }
       if (input.shiftDown && this.gear > 1 && this.shiftT <= 0) { this.gear--; this.shiftT = 0.12; }
     }
     input.shiftUp = input.shiftDown = false;
@@ -134,7 +145,7 @@ export class Vehicle {
     const clutchIn = input.handbrake > 0.4 || this.shiftT > 0 || this.gear === 0;
     let engineTq = 0, wheelTq = 0, IwR = CAR.Iw;
     if (clutchIn) {
-      const target = CAR.idle + thr * (6400 - CAR.idle); this.rpm += (target - this.rpm) * Math.min(1, dt * 9);
+      const target = CAR.idle + thr * (6400 * kRL - CAR.idle); this.rpm += (target - this.rpm) * Math.min(1, dt * 9);
     } else {
       const launch = CAR.idle + 2700 * thr, rpmE = Math.max(CAR.idle, rpmW, launch * sat(1 - rpmW / 3600, 0, 1));
       this.rpm += (rpmE - this.rpm) * Math.min(1, dt * 40);
@@ -198,8 +209,8 @@ export class Vehicle {
     let wheelSpinKick = 0;
     for (const w of W) {
       _rel.set(w._relx, w._rely, w._relz); _hp.set(w._hx, w._hy, w._hz); _f.set(w._fx, w._fy, w._fz); _l.set(w._lx, w._ly, w._lz); _nG.set(w._nx, w._ny, w._nz);
-      const rear = !w.front, Iw = rear ? IwR : CAR.Iw;
-      let drive = rear ? wheelTq * 0.5 : 0;
+      const rear = !w.front, Iw = rear ? IwR : CAR.Iw + (IwR - CAR.Iw) * CAR.fd;
+      let drive = wheelTq * 0.5 * (rear ? 1 - CAR.fd : CAR.fd);
       let bT = brk * (w.front ? CAR.brakeF : CAR.brakeR) * (w.front ? 1 : 1);
       if (rear) bT += input.handbrake * CAR.handbrake * (0.18 + 0.82 * smooth(speed, 6, 22));      // the handbrake only really locks the rears at speed
       if (hold) bT = Math.max(bT, 1700);

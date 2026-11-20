@@ -192,10 +192,11 @@ const matDone = new Set();
 function fixMat(m) {
   if (!m || matDone.has(m)) return; matDone.add(m);
   for (const e of ['KHR_materials_transmission', 'KHR_materials_clearcoat', 'KHR_materials_specular', 'KHR_materials_ior', 'KHR_materials_volume']) { const x = m.getExtension(e); if (x) { m.setExtension(e, null); x.dispose(); } }
-  const nm = cfg.matRename(m.getName()); m.setName(nm);
+  const orig = m.getName(), nm = cfg.matRename(orig); m.setName(nm);
   if (/glass|Window/i.test(nm) && m.getAlphaMode() !== 'BLEND') m.setAlphaMode('BLEND');
   if (/glass|Window/i.test(nm) && /^Light/.test(nm) === false) { const c = m.getBaseColorFactor(); m.setBaseColorFactor([c[0], c[1], c[2], Math.min(c[3], 0.35)]); }
-  if (/^Light_tail/.test(nm)) { m.setAlphaMode('OPAQUE'); m.setBaseColorFactor([0.35, 0.02, 0.02, 1]); m.setEmissiveFactor([1, 0.08, 0.05]); m.setBaseColorTexture(null); m.setEmissiveTexture(null); m.setMetallicFactor(0.2).setRoughnessFactor(0.3); }
+  if (/^Light_tail/.test(nm)) m.setAlphaMode('OPAQUE');
+  if (orig === 'red_glass') { m.setBaseColorFactor([0.35, 0.02, 0.02, 1]); m.setEmissiveFactor([1, 0.08, 0.05]); m.setBaseColorTexture(null); m.setEmissiveTexture(null); m.setMetallicFactor(0.2).setRoughnessFactor(0.3); }
   if (/^Light_head/.test(nm)) { m.setEmissiveFactor([1, 0.92, 0.8]); }
   if (m.getAlphaMode() === 'BLEND' && !/glass|Window/i.test(nm) && m.getBaseColorFactor()[3] >= 0.99) m.setAlphaMode('MASK').setAlphaCutoff(0.4);
   m.setDoubleSided(false);
@@ -237,4 +238,14 @@ const trisOf = () => { let t = 0; for (const m of root.listMeshes()) for (const 
 await doc.transform(
   prune({ keepAttributes: true }), dedup(),
   textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [cfg.texMax, cfg.texMax], quality: 82 }),
-  reorder({ 
+  reorder({ encoder: MeshoptEncoder, target: 'size' }),
+  quantize({ pattern: /^(POSITION|NORMAL|TANGENT)$/, quantizePosition: 14, quantizeNormal: 10 }),
+);
+doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.FILTER });
+fs.mkdirSync('public/car', { recursive: true });
+await io.write(out, doc);
+const fb = getBounds(scene), size = fb.max.map((v, i) => v - fb.min[i]);
+const info = { id, length: +size[2].toFixed(3), width: +size[0].toFixed(3), height: +size[1].toFixed(3), bounds: { min: fb.min.map(v => +v.toFixed(3)), max: fb.max.map(v => +v.toFixed(3)) }, R: +R.toFixed(4), wheels: Object.fromEntries(KEYS.map(k => [k, wheelPos[k].map(v => +v.toFixed(3))])), wheelbase: +(centres.FL[2] - centres.RL[2]).toFixed(3), trackF: +(2 * wheelPos.FL[0]).toFixed(3), trackR: +(2 * wheelPos.RL[0]).toFixed(3), tris: trisOf(), sourceTris: srcTris, scale: +scale.toFixed(4) };
+fs.writeFileSync(`public/car/${id}.json`, JSON.stringify(info, null, 1));
+console.log(info, `\n${out}: ${(fs.statSync(out).size / 1e6).toFixed(2)} MB`);
+console.log('materials', root.listMaterials().map(m => m.getName() + ':' + m.getAlphaMode()[0]).join(' '));

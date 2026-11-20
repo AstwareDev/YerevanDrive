@@ -1,4 +1,4 @@
-// Drivable drift car plug-in (BMW G87 M2 widebody). default export async (ctx) => ({ update(dt, camera, time) })
+// Drivable drift car plug-in (garage cars: BMW G87 M2 widebody, McLaren P1, Lamborghini Countach LPI 800-4; see src/car/profiles.js). default export async (ctx) => ({ update(dt, camera, time) })
 // Wires together: Rapier world + static colliders (src/car/colliders.js), vehicle dynamics (src/car/vehicle.js), model rig, input, chase camera,
 // skid marks / smoke / sparks (src/car/fx.js), procedural audio (src/car/audio.js) and the drift HUD / scoring (src/car/hud.js).
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -7,7 +7,8 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { quality } from './quality.js';
 import { createGround } from './car/ground.js';
 import { createColliders } from './car/colliders.js';
-import { Vehicle, CAR } from './car/vehicle.js';
+import { Vehicle, CAR, applyProfile } from './car/vehicle.js';
+import { CAR_PROFILES, CAR_IDS, DEFAULT_CAR } from './car/profiles.js';
 import { createInput } from './car/input.js';
 import { createCarCamera, CAM_NAMES } from './car/camera.js';
 import { createSkids, createSmoke, createSparks } from './car/fx.js';
@@ -27,42 +28,58 @@ export default async function car(ctx) {
   const circuitsData = await (await fetch('/map/circuits.json')).json().catch(() => []);      // used for a road spawn point; barriers only when the circuits are on
   const circuitsOn = new URLSearchParams(location.search).get('circuits') === '1';
   const colliders = await createColliders({ RAPIER, world, ground, meta, circuits: circuitsOn ? circuitsData : [] });
+  const qs = new URLSearchParams(location.search), LSget = k => { try { return localStorage.getItem(k); } catch { return null; } };
+  let carId = [qs.get('car'), LSget('yd.car')].find(c => CAR_PROFILES[c]) ?? DEFAULT_CAR;
+  applyProfile(carId);
   const vehicle = new Vehicle({ RAPIER, world, ground });
 
   // ------------------------------------------------------------------ model + rig
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync('/car/bmw_m2.glb');
-  const root = new THREE.Group(); root.name = 'player-car';
-  const model = gltf.scene; model.position.set(0, -CAR.hCOM, -CAR.zCOM); root.add(model); scene.add(root);
-  const rig = {}; for (const k of ['FL', 'FR', 'RL', 'RR']) rig[k] = { steer: model.getObjectByName('steer_' + k), spin: model.getObjectByName('spin_' + k) };
-  const paintMats = []; const lightMats = [];
-  let paintMat = null;
-  model.traverse(o => {
-    if (!o.isMesh) return;
-    o.castShadow = true; o.receiveShadow = true; o.frustumCulled = true;
-    const ms = Array.isArray(o.material) ? o.material : [o.material];
-    ms.forEach((m, i) => {
-      const n = m.name || '';
-      if (/^paint$/i.test(n)) {
-        if (!paintMat) paintMat = new THREE.MeshPhysicalMaterial({ color: 0x0a3f9e, metalness: 0.55, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.4 });
-        if (Array.isArray(o.material)) o.material[i] = paintMat; else o.material = paintMat;
-      }
-      if (/Light/i.test(n) && m.emissiveMap) lightMats.push(m);
-      if (/glass|Window/i.test(n)) { m.transparent = true; m.depthWrite = false; m.opacity = Math.min(m.opacity, 0.35); m.roughness = 0.05; m.envMapIntensity = 1.5; }
-      if ('envMapIntensity' in m && !/^paint$/i.test(n)) m.envMapIntensity = Math.max(m.envMapIntensity, 1.0);
-      m.needsUpdate = true;
-    });
-    if (quality.level === 'low' && /Interior|SeatBelt|Engine/i.test(o.name + (o.parent?.name ?? ''))) o.visible = false;
-  });
+  const root = new THREE.Group(); root.name = 'player-car'; scene.add(root);
+  const paintMat = new THREE.MeshPhysicalMaterial({ color: 0x0a3f9e, metalness: 0.55, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.4 });      // one paint material shared by every garage car
+  // every garage GLB is loaded once and prepared once (paint swap, glass, lights); the local car mounts the scene itself, remote players get clones of it
+  const entries = new Map();
+  function loadEntry(id) {
+    if (!entries.has(id)) entries.set(id, loader.loadAsync(CAR_PROFILES[id].file).then(gltf => {
+      const lightMats = [];
+      gltf.scene.traverse(o => {
+        if (!o.isMesh) return;
+        o.castShadow = o.name !== 'Underbody' && o.name !== 'Interior'; o.receiveShadow = true; o.frustumCulled = true;
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        ms.forEach((m, i) => {
+          const n = m.name || '';
+          if (/^paint$/i.test(n)) { if (Array.isArray(o.material)) o.material[i] = paintMat; else o.material = paintMat; return; }
+          if (/Light/i.test(n) && (m.emissiveMap || m.emissive.getHex() > 0) && !lightMats.includes(m)) lightMats.push(m);
+          if (/glass|Window/i.test(n)) { m.transparent = true; m.depthWrite = false; m.opacity = Math.min(m.opacity, 0.35); m.roughness = 0.05; m.envMapIntensity = 1.5; }
+          if ('envMapIntensity' in m) m.envMapIntensity = Math.max(m.envMapIntensity, 1.0);
+          m.needsUpdate = true;
+        });
+        if (quality.level === 'low' && /Interior|SeatBelt|Engine|Underbody/i.test(o.name + (o.parent?.name ?? ''))) o.visible = false;
+      });
+      return { scene: gltf.scene, lightMats };
+    }));
+    return entries.get(id);
+  }
+  const rig = { FL: {}, FR: {}, RL: {}, RR: {} };
+  let model = null, lightMats = [];
+  function mountModel(entry) {
+    if (model) root.remove(model);
+    model = entry.scene; lightMats = entry.lightMats;
+    model.position.set(0, -CAR.hCOM, -CAR.zCOM); root.add(model);
+    for (const k of ['FL', 'FR', 'RL', 'RR']) rig[k] = { steer: model.getObjectByName('steer_' + k), spin: model.getObjectByName('spin_' + k) };
+  }
+  mountModel(await loadEntry(carId));
   let paintIdx = 2;
-  function applyPaint(i) { paintIdx = (i + PAINTS.length) % PAINTS.length; const [, c, m] = PAINTS[paintIdx]; paintMat?.color.setHex(c).convertSRGBToLinear(); if (paintMat) paintMat.metalness = m; }
+  function applyPaint(i) { paintIdx = (i + PAINTS.length) % PAINTS.length; const [, c, m] = PAINTS[paintIdx]; paintMat.color.setHex(c).convertSRGBToLinear(); paintMat.metalness = m; }
   applyPaint(paintIdx);
 
   // headlights (spot lights, ground-reflection and facade lighting at night)
   const heads = [];
   for (const s of [-1, 1]) {
-    const sp = new THREE.SpotLight(0xfff1dc, 0, 95, 0.42, 0.75, 1.7); sp.position.set(0.62 * s, 0.22, 2.0); sp.target.position.set(0.62 * s, -0.4, 40); root.add(sp, sp.target); heads.push(sp);
+    const sp = new THREE.SpotLight(0xfff1dc, 0, 95, 0.42, 0.75, 1.7); sp.userData.side = s; root.add(sp, sp.target); heads.push(sp);
   }
+  const placeHeads = () => { for (const sp of heads) { const [hx, hy, hz] = CAR.head, s = sp.userData.side; sp.position.set(hx * s, hy, hz); sp.target.position.set(hx * s, hy - 0.62, 40); } };
+  placeHeads();
   let lightsOn = true;
 
   // ------------------------------------------------------------------ systems
@@ -105,8 +122,8 @@ export default async function car(ctx) {
   const skidsClear = () => { smoke.clear(); };
   vehicle.reset(spawn.x, spawn.z, spawn.heading, spawn.y);
   colliders.prime(spawn.x, spawn.z);
-  for (let i = 0; i < 90; i++) { vehicle.input.handbrake = 0; vehicle.step(DT); }      // settle the suspension
-  vehicle.prevPos.copy(vehicle.pos); vehicle.prevQuat.copy(vehicle.quat);
+  const settle = () => { for (let i = 0; i < 90; i++) { vehicle.input.handbrake = 0; vehicle.step(DT); } vehicle.prevPos.copy(vehicle.pos); vehicle.prevQuat.copy(vehicle.quat); };      // settle the suspension
+  settle();
   drive.wanted = true;
 
   // ------------------------------------------------------------------ per-frame
@@ -187,8 +204,8 @@ export default async function car(ctx) {
     sparks.setScale(renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360)));
 
     // audio + hud
-    audio.update({ dt, rpm: vehicle.rpm, throttle: vehicle.input.throttle, boost: vehicle.boost, speed: sp, slipF, slipR, hard, limiter: vehicle.limiter, scrape: vehicle.scrape, gear: vehicle.gear });
-    Object.assign(hudState, { beta: vehicle.t.beta, kmh: vehicle.t.kmh, speed: sp, grounded: vehicle.grounded, vLong: vehicle.t.vLong, slipR, wallDist, crashed, gear: vehicle.gear, rpm: vehicle.rpm, assist: vehicle.steerAssist, abs: vehicle.abs, auto: vehicle.auto, handbrake: vehicle.input.handbrake, cam: CAM_NAMES[cam.mode] });
+    audio.update({ dt, rpm: vehicle.rpm * 7200 / CAR.redline, throttle: vehicle.input.throttle, boost: vehicle.boost, speed: sp, slipF, slipR, hard, limiter: vehicle.limiter, scrape: vehicle.scrape, gear: vehicle.gear });
+    Object.assign(hudState, { beta: vehicle.t.beta, kmh: vehicle.t.kmh, speed: sp, grounded: vehicle.grounded, vLong: vehicle.t.vLong, slipR, wallDist, crashed, gear: vehicle.gear, rpm: vehicle.rpm * 7200 / CAR.redline, assist: vehicle.steerAssist, abs: vehicle.abs, auto: vehicle.auto, handbrake: vehicle.input.handbrake, cam: CAM_NAMES[cam.mode] });
     hud.update(dt, hudState);
 
     // camera + shared focus (shadow frustum, lamp lights, streaming)
@@ -200,31 +217,51 @@ export default async function car(ctx) {
   console.log(`[car] ready in ${(performance.now() - t0).toFixed(0)} ms, spawn`, spawn);
   // ------------------------------------------------------------------ multiplayer hooks (src/mp.js): net state of the local car + clones of the model for remote players
   const wheelAvg = front => { let a = 0, n = 0; for (const w of vehicle.wheels) if (!!w.front === front) { a += w.omega; n++; } return n ? a / n : 0; };
-  function makeRemote(pi = 0) {
-    const g = new THREE.Group(); g.name = 'remote-car'; const mdl = model.clone(true); g.add(mdl);
-    const pm = paintMat.clone(), lms = new Map();
-    mdl.traverse(o => {
-      if (!o.isMesh) return;
-      const swap = m => { if (m === paintMat) return pm; if (lightMats.includes(m)) { let c = lms.get(m); if (!c) lms.set(m, c = m.clone()); return c; } return m; };
-      o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
-    });
-    const rg = {}, spin = { FL: 0, FR: 0, RL: 0, RR: 0 }; for (const k of ['FL', 'FR', 'RL', 'RR']) rg[k] = { steer: mdl.getObjectByName('steer_' + k), spin: mdl.getObjectByName('spin_' + k) };
-    scene.add(g);
+  function makeRemote(pi = 0, ci = DEFAULT_CAR) {
+    const g = new THREE.Group(); g.name = 'remote-car'; scene.add(g);
+    const pm = paintMat.clone(), lms = new Map(), spin = { FL: 0, FR: 0, RL: 0, RR: 0 }; let rg = {}, mdl = null, cur = null, dead = false;
+    async function setCar(id) {
+      if (!CAR_PROFILES[id] || id === cur) return; cur = id;
+      const e = await loadEntry(id); if (dead || cur !== id) return;
+      if (mdl) g.remove(mdl); lms.clear();
+      mdl = e.scene.clone(true); const ph = CAR_PROFILES[id].phys; mdl.position.set(0, -ph.hCOM, -ph.zCOM);
+      mdl.traverse(o => {
+        if (!o.isMesh) return;
+        const swap = m => { if (m === paintMat) return pm; if (e.lightMats.includes(m)) { let c = lms.get(m); if (!c) lms.set(m, c = m.clone()); return c; } return m; };
+        o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+      });
+      rg = {}; for (const k of ['FL', 'FR', 'RL', 'RR']) rg[k] = { steer: mdl.getObjectByName('steer_' + k), spin: mdl.getObjectByName('spin_' + k) };
+      g.add(mdl);
+    }
+    setCar(ci);
     const api = {
-      root: g,
+      root: g, setCar,
       setPaint(i) { const [, c, m] = PAINTS[((i % PAINTS.length) + PAINTS.length) % PAINTS.length]; pm.color.setHex(c).convertSRGBToLinear(); pm.metalness = m; },
       /** st: { steer, wf, wr (wheel rad/s), brake } */
       update(dt, st) {
-        for (const k of ['FL', 'FR', 'RL', 'RR']) { const r = rg[k]; if (!r.spin) continue; spin[k] = (spin[k] + (k[0] === 'F' ? st.wf : st.wr) * dt) % (Math.PI * 2); r.spin.rotation.x = spin[k]; if (k[0] === 'F' && r.steer) r.steer.rotation.y = st.steer; }
+        for (const k of ['FL', 'FR', 'RL', 'RR']) { const r = rg[k]; if (!r?.spin) continue; spin[k] = (spin[k] + (k[0] === 'F' ? st.wf : st.wr) * dt) % (Math.PI * 2); r.spin.rotation.x = spin[k]; if (k[0] === 'F' && r.steer) r.steer.rotation.y = st.steer; }
         const night = tod.night; for (const m of lms.values()) m.emissiveIntensity = 1.0 * (0.25 + 0.75 * night) + (st.brake ? 1.5 : 0);
       },
-      dispose() { scene.remove(g); pm.dispose(); for (const m of lms.values()) m.dispose(); },
+      dispose() { dead = true; scene.remove(g); pm.dispose(); for (const m of lms.values()) m.dispose(); },
     };
     api.setPaint(pi); return api;
   }
+  // garage: switch the local car (loads the GLB on first use, swaps physics profile + model, respawns on the spot)
+  let switching = false;
+  async function setCar(id) {
+    if (!CAR_PROFILES[id] || switching) return false; if (id === carId) return true;
+    switching = true;
+    try {
+      const entry = await loadEntry(id), p = vehicle.pos, heading = Math.atan2(vehicle.fwd.x, vehicle.fwd.z), x = p.x, z = p.z;
+      carId = id; applyProfile(id); vehicle.setProfile(id); mountModel(entry); placeHeads();
+      vehicle.reset(x, z, heading, null); colliders.prime(x, z); input.reset(); cam.reset(); skidsClear(); hud.resetScore(); settle();
+      try { localStorage.setItem('yd.car', id); } catch { /* private mode */ }
+    } finally { switching = false; }
+    return true;
+  }
   drive.pad = input.pad;       // gamepad state for the map (stick pans, triggers zoom)
   drive.car = {
-    vehicle, ground, hud, makeRemote, paint: () => paintIdx, setPaint: applyPaint, paints: PAINTS.map(([name, hex]) => ({ name, hex })), setVisible: v => { root.visible = v; }, setLights: v => { lightsOn = v; }, audio, paintHex: PAINTS.map(p => p[1]), lights: () => lightsOn,
+    vehicle, ground, hud, makeRemote, setCar, carId: () => carId, cars: CAR_IDS.map(id => ({ id, name: CAR_PROFILES[id].name, sub: CAR_PROFILES[id].sub })), carName: id => CAR_PROFILES[id]?.name ?? '', paint: () => paintIdx, setPaint: applyPaint, paints: PAINTS.map(([name, hex]) => ({ name, hex })), setVisible: v => { root.visible = v; }, setLights: v => { lightsOn = v; }, audio, paintHex: PAINTS.map(p => p[1]), lights: () => lightsOn,
     teleport: (x, z, heading) => respawn({ x, z, y: null, heading }),
     /** local car net state: [x,y,z, qx,qy,qz,qw, vx,vy,vz, steer, wheelF, wheelR, brake] */
     netState: () => { const p = vehicle.pos, q = vehicle.quat, v = vehicle.vel; return [p.x, p.y, p.z, q.x, q.y, q.z, q.w, v.x, v.y, v.z, (vehicle.wheels[0].steer + vehicle.wheels[1].steer) / 2, wheelAvg(true), wheelAvg(false), vehicle.input.brake > 0.1 ? 1 : 0]; },

@@ -41,10 +41,11 @@ export default async function ({ THREE, drive }) {
     if (m && m.bye && m.i !== myId) { const g = players.get(m.i); if (g) dropPlayer(g); return; }
     if (!m || m.i === myId || !Array.isArray(m.a)) return;
     const now = performance.now(); let p = players.get(m.i);
-    if (!p) { if (players.size >= MAX_REMOTE) return; p = { id: m.i, name: 'Driver', paint: 0, snaps: [], car: null, tag: null, seen: now, x: 0, z: 0, heading: 0, lastSeq: -1 }; players.set(m.i, p); linked = true; }
+    if (!p) { if (players.size >= MAX_REMOTE) return; p = { id: m.i, name: 'Driver', paint: 0, carId: null, snaps: [], car: null, tag: null, seen: now, x: 0, z: 0, heading: 0, lastSeq: -1 }; players.set(m.i, p); linked = true; }
     if (m.s <= p.lastSeq && m.s > p.lastSeq - 1000) return;         // duplicate (arrived through both transports) or stale
     p.lastSeq = m.s; p.seen = now; if (m.n) p.name = String(m.n).slice(0, 16);
     if (m.p !== undefined && m.p !== p.paint) { p.paint = m.p; p.car?.setPaint(p.paint); }
+    if (typeof m.c === 'string' && m.c !== p.carId) { p.carId = m.c; p.car?.setCar(p.carId); }      // garage car of that player
     p.snaps.push({ t: now, a: m.a }); if (p.snaps.length > 24) p.snaps.shift();
   }
   if (qs.get('bc') !== '0') try { bc = new BroadcastChannel('yerevan-mp-' + roomName); bc.onmessage = e => handle(e.data); } catch { /* no BroadcastChannel */ }
@@ -78,7 +79,7 @@ export default async function ({ THREE, drive }) {
   panel.addEventListener('click', e => { if (!e.target.closest('.me')) return; const n = prompt('Your driver name', myName); if (n && n.trim()) { myName = n.trim().slice(0, 16); localStorage.setItem('mp.name', myName); renderPanel(); } });
 
   let spectating = false;
-  const sendState = () => { const dc = drive.car; if (!dc || spectating) return; const a = dc.netState().map((v, k) => k >= 3 && k <= 6 ? r4(v) : r2(v)); send({ i: myId, s: ++seq, a, n: myName, p: dc.paint() }); };
+  const sendState = () => { const dc = drive.car; if (!dc || spectating) return; const a = dc.netState().map((v, k) => k >= 3 && k <= 6 ? r4(v) : r2(v)); send({ i: myId, s: ++seq, a, n: myName, p: dc.paint(), c: dc.carId() }); };
   // a hidden tab stops rendering (and driving) but keeps its parked car visible to the others
   let lastFrame = performance.now();
   setInterval(() => { if (performance.now() - lastFrame > 1200) sendState(); }, 1000);
@@ -92,7 +93,7 @@ export default async function ({ THREE, drive }) {
     for (const p of [...players.values()]) {
       if (now - p.seen > TIMEOUT) { dropPlayer(p); continue; }
       const sn = p.snaps; if (!sn.length) continue;
-      if (!p.car) p.car = dc.makeRemote(p.paint);
+      if (!p.car) p.car = dc.makeRemote(p.paint, p.carId ?? undefined);
       let i = sn.length - 1; while (i > 0 && sn[i].t > rt) i--;
       const A = sn[i].a, B = sn[i + 1]?.a; let k = 0, x, y, z;
       if (B) {
@@ -107,7 +108,7 @@ export default async function ({ THREE, drive }) {
       const dist = Math.hypot(x - cam.position.x, z - cam.position.z);
       if (v3.z < 1 && Math.abs(v3.x) < 1.1 && Math.abs(v3.y) < 1.1 && dist < 600) {
         tag.style.display = 'block'; tag.style.left = ((v3.x * 0.5 + 0.5) * innerWidth).toFixed(0) + 'px'; tag.style.top = ((-v3.y * 0.5 + 0.5) * innerHeight).toFixed(0) + 'px';
-        const html = `${esc(p.name)}<small>${fmt(dist)}</small>`; if (tag.dataset.h !== html) { tag.dataset.h = html; tag.innerHTML = html; }
+        const html = `${esc(p.name)}<small>${p.carId && dc.carName ? esc(dc.carName(p.carId)) + ' · ' : ''}${fmt(dist)}</small>`; if (tag.dataset.h !== html) { tag.dataset.h = html; tag.innerHTML = html; }
       } else tag.style.display = 'none';
       list.push({ id: p.id, name: p.name, x, y, z, heading: p.heading, color: col(dc.paintHex[p.paint] ?? 0x888888) });
     }
