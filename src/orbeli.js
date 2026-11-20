@@ -6,6 +6,7 @@
 // Contract: default export async ctx => ({ update(dt, camera, time) })
 import { buildStreetBlocks } from './streets/facade.js';
 import { buildStreetscape } from './streets/streetscape.js';
+import { buildOrbeliMedian } from './streets/median.js';
 import { shared as matShared } from './materials.js';
 import { quality } from './quality.js';
 const FLOOR_B = 3.1, FLOOR_G = 3.7, BAY_B = 3.3, BAY_G = 4;
@@ -99,6 +100,7 @@ export default async function (ctx) {
     blocks: [rect(0, SB, 9001, 6, [160, 98, 82], 'mixed'), rect(SE, SO, 9002, 4, [196, 112, 70]), rect(SO, len, 9003, 6, [176, 128, 112]), ...(data.blocks ?? [])] });
   const stats = streetBlocks.stats;
   const scape = buildStreetscape({ data, H, root, M: ctx.M });
+  const median = buildOrbeliMedian({ data, H, root });   // raised flower median, AVANTA billboard, flagpole (src/streets/median.js)
   const bisa = volume({ s0: SB, s1: SE, d0: SETBACK, d1: depth, floors: 5, floorH: FLOOR_G, name: 'bisa', cornice: false,
     front: () => mat(glassT, [1, 1], { rough: 0.25, metal: 0.35, env: 1.4, glow: 1.0 }), back: () => mat(plainT, [4, 3]), side: dp => mat(plainT, [dp / 13.2, 5 * FLOOR_G / 6.2]) });
   { const pr = new THREE.Mesh(new THREE.BoxGeometry(7, 2.4, 6), steel); const c = P((SB + SE) / 2, depth * 0.55); pr.position.set(c[0], bisa.y0 + bisa.h + 1.2, c[1]); pr.rotation.y = theta; root.add(pr); }
@@ -172,7 +174,7 @@ export default async function (ctx) {
   return {
     update(dt, camera, time) {
       const n = tod?.night ?? 1; for (const e of emis) e.m.emissiveIntensity = e.k * n;
-      uNight.value = n; streetBlocks.update(camera.position, n);
+      uNight.value = n; streetBlocks.update(camera.position, n); median.update(time, n);
     },
   };
 }
