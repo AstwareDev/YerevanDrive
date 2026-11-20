@@ -4,9 +4,12 @@ const PRESETS = {
   low:  { texSize: 512,  anisotropy: 4,  shadows: false, shadowMap: 1024, reflections: false, reflectionScale: 0.35, bloom: false, msaa: 0, pixelRatio: 1.0, propScale: 0.35, carDetail: 0, treeDetail: 0, detailRadius: 220, lodScale: 0.6, farRadius: 5000 },
   med:  { texSize: 1024, anisotropy: 8,  shadows: true,  shadowMap: 2048, reflections: true,  reflectionScale: 0.4,  bloom: true,  msaa: 2, pixelRatio: 1.25, propScale: 0.7,  carDetail: 1, treeDetail: 1, detailRadius: 380, lodScale: 0.85, farRadius: 9000 },
   high: { texSize: 2048, anisotropy: 16, shadows: true,  shadowMap: 4096, reflections: true,  reflectionScale: 0.6,  bloom: true,  msaa: 4, pixelRatio: 1.5,  propScale: 1.0,  carDetail: 2, treeDetail: 2, detailRadius: 520, lodScale: 1.0,  farRadius: 14000 },
+  // opt-in only (menu or ?q=ultra, never auto-detected): the culling/LOD savings are spent on resolution, shadows, reflections and draw distance. The perf governor still scales down if fps drops.
+  ultra: { texSize: 2048, anisotropy: 16, shadows: true, shadowMap: 6144, reflections: true,  reflectionScale: 0.8,  bloom: true,  msaa: 4, pixelRatio: 2.0, supersample: 1.5, propScale: 1.0,  carDetail: 2, treeDetail: 2, detailRadius: 700, lodScale: 1.35, farRadius: 18000 },
 };
 function detect() {
-  const q = new URLSearchParams(location.search).get('q');
+  let saved = null; try { saved = localStorage.getItem('yd.q'); } catch { /* ignore */ }
+  const q = new URLSearchParams(location.search).get('q') || saved;
   if (q && PRESETS[q]) return q;
   try {
     const gl = document.createElement('canvas').getContext('webgl2'); const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
@@ -18,4 +21,6 @@ function detect() {
 }
 const level = detect();
 export const quality = { level, ...PRESETS[level] };
+// Final render scale: device ratio, optionally supersampled (ultra renders 1.5x above native so a 1x monitor is still sharper than High), capped by `pixelRatio`.
+quality.targetPR = Math.min(devicePixelRatio * (quality.supersample ?? 1), quality.pixelRatio);
 export const qualityLevels = PRESETS;

@@ -13,10 +13,10 @@ export function createGovernor({ renderer, composer, quality, bloom, ssrPass, mo
     () => { setPR(0.6); quality.lodScale = baseLod * 0.7; bloom.enabled = false; },
   ];
   let level = 0, ema = 16.7, slow = 0, fast = 0, t = 0;
-  function setPR(k) { renderer.setPixelRatio(Math.min(devicePixelRatio, basePixelRatio) * k); composer.setPixelRatio(Math.min(devicePixelRatio, basePixelRatio) * k); composer.setSize(innerWidth, innerHeight); }
+  function setPR(k) { renderer.setPixelRatio(basePixelRatio * k); composer.setPixelRatio(basePixelRatio * k); composer.setSize(innerWidth, innerHeight); }
   function apply(l) {
     // reset to full, then apply cumulative steps up to l
-    renderer.setPixelRatio(Math.min(devicePixelRatio, basePixelRatio)); composer.setPixelRatio(Math.min(devicePixelRatio, basePixelRatio)); quality.lodScale = baseLod;
+    renderer.setPixelRatio(basePixelRatio); composer.setPixelRatio(basePixelRatio); quality.lodScale = baseLod;
     if (ssrPass) ssrPass.enabled = quality.reflections; moon.castShadow = quality.shadows; bloom.enabled = quality.bloom;
     for (let i = 1; i <= l; i++) steps[i]();
     composer.setSize(innerWidth, innerHeight); level = l;

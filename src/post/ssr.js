@@ -67,7 +67,7 @@ export function createSSR({ camera, heightGrid, wetness, quality }) {
   const tex = new THREE.DataTexture(half, N, N, THREE.RedFormat, THREE.HalfFloatType); tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.needsUpdate = true;
   const pass = new ShaderPass({
     uniforms: { tDiffuse: { value: null }, tDepth: { value: null }, uHeight: { value: tex }, uProj: { value: new THREE.Matrix4() }, uProjInv: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() },
-      uWet: { value: 1 }, uTime: { value: 0 }, uDay: { value: 0 }, uMaxDist: { value: 70 }, uExt: { value: R }, uSteps: { value: quality.level === 'high' ? 36 : 22 }, uSky: { value: new THREE.Color(0.03, 0.025, 0.05) } },
+      uWet: { value: 1 }, uTime: { value: 0 }, uDay: { value: 0 }, uMaxDist: { value: 70 }, uExt: { value: R }, uSteps: { value: quality.level === 'ultra' ? 48 : quality.level === 'high' ? 36 : 22 }, uSky: { value: new THREE.Color(0.03, 0.025, 0.05) } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: FRAG,
   });

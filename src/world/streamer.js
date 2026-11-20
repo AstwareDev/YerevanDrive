@@ -49,6 +49,9 @@ export class Streamer {
 
   update(pos, force = false) {
     this.frame++; this.flushPending();
+    // smoothed travel direction -> a look-ahead point, so the load queue favours tiles in the direction of travel (never culls the rear)
+    if (this.prev) { const k = 0.08; this.vel.x += (pos.x - this.prev.x - this.vel.x) * k; this.vel.z += (pos.z - this.prev.z - this.vel.z) * k; } else { this.prev = new THREE.Vector3(); this.vel = { x: 0, z: 0 }; }
+    this.prev.copy(pos);
     if (!force && pos.distanceToSquared(this.lastPos) < 25 && this.frame % 30 !== 0) return;
     this.lastPos.copy(pos);
     const want = []; for (const r of this.roots) this.select(r, pos, want);
@@ -62,7 +65,9 @@ export class Streamer {
     this.stat.shown = show.size; this.stat.tris = tris;
     // load queue: wanted nodes nearest-first, then their coarser ancestors as cover
     const need = new Set(want); for (const n of want) for (let a = n.parent, k = 0; a && k < 6; a = a.parent, k++) need.add(a);
-    this.queue = [...need].filter(n => n.state === 'idle').sort((a, b) => this.dist(a, pos) - this.dist(b, pos));
+    const ahead = this._ahead ??= new THREE.Vector3(); ahead.set(pos.x + this.vel.x * 90, pos.y, pos.z + this.vel.z * 90);   // ~1.5 s of travel at 60 fps
+    const pri = n => Math.min(this.dist(n, pos), this.dist(n, ahead) + 40);
+    this.queue = [...need].filter(n => n.state === 'idle').map(n => [pri(n), n]).sort((a, b) => a[0] - b[0]).map(e => e[1]);
     this.desired = need; this.pump(); this.evict(pos);
   }
   pump() {
@@ -88,7 +93,7 @@ export class Streamer {
     this.stat.loaded++;
   }
   evict(pos) {
-    const cap = this.quality.level === 'low' ? 110 : this.quality.level === 'med' ? 180 : 280, loaded = [...this.nodes.values()].filter(n => n.state === 'loaded');
+    const cap = this.quality.level === 'low' ? 110 : this.quality.level === 'med' ? 180 : this.quality.level === 'ultra' ? 360 : 280, loaded = [...this.nodes.values()].filter(n => n.state === 'loaded');
     if (loaded.length <= cap) return;
     const now = performance.now();
     loaded.filter(n => !this.desired.has(n) && !n.shown && now - n.last > 4000).sort((a, b) => a.last - b.last).slice(0, loaded.length - cap).forEach(n => {

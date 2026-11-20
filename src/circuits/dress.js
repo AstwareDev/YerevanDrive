@@ -25,7 +25,7 @@ export function ribbon(gb, tr, i0, len, lat0, lat1, yoff, uv, { vLen = 1, step =
 export function dressTrack(kit, tr) {
   const { quality, batches: B, gb: G, tex } = kit, c = tr.c, n = tr.n, ds = tr.ds, ps = quality.propScale, H = tr.H;
   const rng = mkRng(hashStr(tr.id)), f = {}, f2 = {};
-  const lowQ = quality.level === 'low', highQ = quality.level === 'high';
+  const lowQ = quality.level === 'low', highQ = quality.level === 'high' || quality.level === 'ultra';
   const sideSign = s => (s === 'R' ? 1 : -1);
   const outsideOf = co => (co.dir === 'R' ? -1 : 1);                 // +1 right of travel, -1 left
   const cover = [new Uint8Array(n), new Uint8Array(n)];              // [left, right]; 0 free, 1 tyres, 2 rail, 3 jersey, 4 mouth

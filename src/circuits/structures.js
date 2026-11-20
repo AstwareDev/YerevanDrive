@@ -200,4 +200,4 @@ export function dressStructures(kit, tr) {
   }
   kit.stats[tr.id] = { ...(kit.stats[tr.id] ?? {}), ...stats };
 }
-function highQ(q) { return q.level === 'high'; }
+function highQ(q) { return q.level === 'high' || q.level === 'ultra'; }

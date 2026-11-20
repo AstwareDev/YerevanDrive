@@ -22,7 +22,7 @@ const FOG = new THREE.Color(0.115 * 0.85, 0.075 * 0.85, 0.13 * 0.85);
 
 // ------------------------------------------------------------ renderer / scene
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio));
+renderer.setPixelRatio(quality.targetPR);
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -160,7 +160,7 @@ const pluginUpdates = [];
 // shared with the car plug-in (src/car.js): drive mode takes over the camera, `focus` feeds the shadow frustum / lamp lights
 const drive = { active: false, wanted: false, uiLock: false, focus: new THREE.Vector3(), set(v) { setMode(v ? 'drive' : 'orbit'); } };
 {
-  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js', './mp.js', './orbeli.js']);
+  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js', './mp.js', './menu.js', './orbeli.js']);
   const wantCircuits = new URLSearchParams(location.search).get('circuits') === '1';     // the race circuits are off by default: free roam (?circuits=1 restores them)
   for (const [path, load] of Object.entries(found)) {
     if (path.endsWith('circuits.js') && !wantCircuits) continue;
@@ -232,10 +232,12 @@ let mode = 'orbit';
 const keys = new Set(); let flySpeed = 25, yaw = 0, pitch = -0.2, dragging = false;
 function setMode(m) {
   mode = m; orbit.enabled = m === 'orbit'; car.visible = m === 'tour'; drive.active = m === 'drive'; $('hud').classList.toggle('hidden', m === 'drive');
+  if (m === 'custom') orbit.enabled = false;
   if (m === 'fly') { const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ'); yaw = e.y; pitch = e.x; }
   if (m === 'tour') { camPos.copy(camera.position); }
-  $('mode').textContent = { orbit: 'ORBIT', fly: 'FLY', tour: 'TOUR', drive: 'DRIVE' }[m];
+  $('mode').textContent = { orbit: 'ORBIT', fly: 'FLY', tour: 'TOUR', drive: 'DRIVE', custom: 'MENU' }[m];
 }
+drive.setMode = setMode;
 // free camera looking at a point of the map (used by the map's "View in 3D")
 drive.lookAt = (x, z, dist = 240) => {
   setMode('orbit'); const y = heightAt(x, z); orbit.target.set(x, y + 6, z);
@@ -244,6 +246,7 @@ drive.lookAt = (x, z, dist = 240) => {
 addEventListener('keydown', e => {
   if (e.target?.closest?.('input,textarea,[contenteditable]')) return;      // typing in the map search
   keys.add(e.code);
+  if (drive.menuOn && /^(Digit[1-4]|KeyN|KeyH)$/.test(e.code)) return;      // the menu / role system owns the camera modes
   if (e.code === 'Digit1') setMode('orbit'); if (e.code === 'Digit2') setMode('fly'); if (e.code === 'Digit3') setMode('tour'); if (e.code === 'Digit4') setMode('drive');
   if (e.code === 'KeyN' && mode !== 'drive') { tourIdx = (tourIdx + 1) % tours.length; tourS = 0; }
   if (e.code === 'KeyB') bloom.enabled = !bloom.enabled;
@@ -263,7 +266,7 @@ function fitSize() {
   camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h); composer.setSize(w, h); bloom.setSize(w, h);
 }
 
-if (drive.wanted) setMode('drive');
+if (drive.startMode) setMode(drive.startMode); else if (drive.wanted) setMode('drive');
 // deterministic hooks for screenshots/tests
 window.__yerevan = { drive, THREE, tod, streamer, quality, setTod(v) { todTarget = v; applyTod(v); }, setMode, camera, orbit, setCam(px, py, pz, tx, ty, tz) { setMode('orbit'); camera.position.set(px, py, pz); orbit.target.set(tx, ty, tz); orbit.update(); }, bloom, renderer, scene, wetness, tourStart(i, s) { tourIdx = i; tourS = s; setMode('tour'); } };
 
@@ -271,11 +274,16 @@ window.__yerevan = { drive, THREE, tod, streamer, quality, setTod(v) { todTarget
 $('loading').classList.add('done');
 progress('Ready', 1);
 let statT = 0;
-const governor = createGovernor({ renderer, composer, quality, bloom, ssrPass: ssr, moon, basePixelRatio: quality.pixelRatio });
+const governor = createGovernor({ renderer, composer, quality, bloom, ssrPass: ssr, moon, basePixelRatio: quality.targetPR });
 const clock = new THREE.Clock(); let frames = 0, acc = 0, lastLamp = 0;
+// frame-time ring (last ~600 frames) for the stats line + window.__yerevan.bench(): avg fps and 1% low are what you feel, not the instant fps
+const ft = new Float32Array(600); let ftN = 0;
+const benchStats = () => { const n = Math.min(ftN, ft.length); if (n < 30) return null; const a = Array.from(ft.subarray(0, n)).sort((x, y) => x - y), avg = a.reduce((s, v) => s + v, 0) / n, low = a.slice(Math.floor(n * 0.99)).reduce((s, v) => s + v, 0) / Math.max(1, n - Math.floor(n * 0.99)); return { fps: +(1000 / avg).toFixed(1), low1: +(1000 / low).toFixed(1), worstMs: +a[n - 1].toFixed(1), frames: n }; };
+window.__yerevan.bench = () => ({ ...benchStats(), quality: quality.level, pixelRatio: renderer.getPixelRatio(), governorStep: governor.level, drawCalls: renderer.info.render.calls, triM: +(renderer.info.render.triangles / 1e6).toFixed(2), textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries, gpu: (() => { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })() });
 renderer.setAnimationLoop(() => {
   fitSize();
-  const dt = Math.min(clock.getDelta(), 0.1);
+  const rawDt = clock.getDelta(); ft[ftN++ % ft.length] = rawDt * 1000;
+  const dt = Math.min(rawDt, 0.1);
   if (Math.abs(tod.day - todTarget) > 1e-3) { applyTod(tod.day + Math.sign(todTarget - tod.day) * Math.min(Math.abs(todTarget - tod.day), dt / 2.5)); }
   if (mode === 'orbit') { orbit.update(); focus.copy(orbit.target); }
   else if (mode === 'fly') {
@@ -286,6 +294,8 @@ renderer.setAnimationLoop(() => {
     if (keys.has('KeyD')) camera.position.addScaledVector(right, sp); if (keys.has('KeyA')) camera.position.addScaledVector(right, -sp);
     if (keys.has('KeyE')) camera.position.y += sp; if (keys.has('KeyQ')) camera.position.y -= sp;
     camera.lookAt(camera.position.clone().add(fwd)); focus.copy(camera.position).addScaledVector(fwd, 25);
+  } else if (mode === 'custom') {
+    drive.camUpdate?.(dt, camera); focus.copy(drive.focus);
   } else {
     const t = tours[tourIdx]; tourS += 17 * dt;
     const p = tourAt(t, tourS), q = tourAt(t, tourS + 6);
@@ -303,7 +313,7 @@ renderer.setAnimationLoop(() => {
   governor.update(dt);
   streamer.update(camera.position);
   sky.position.copy(camera.position); sky.material.uniforms.uTime.value = clock.elapsedTime;
-  if (clock.elapsedTime - statT > 1) { statT = clock.elapsedTime; $('stats').textContent = `${(streamer.stat.tris / 1e6).toFixed(2)}M tris · ${streamer.stat.shown} tiles shown · ${streamer.stat.loaded} loaded · q=${quality.level}${governor.level ? '-' + governor.level : ''}`; }
+  if (clock.elapsedTime - statT > 1) { statT = clock.elapsedTime; $('stats').textContent = `${(streamer.stat.tris / 1e6).toFixed(2)}M tris · ${streamer.stat.shown} tiles shown · ${streamer.stat.loaded} loaded · q=${quality.level}${governor.level ? '-' + governor.level : ''}${(b => b ? ` · ${b.fps} fps (1% low ${b.low1}) · x${renderer.getPixelRatio().toFixed(2)}` : '')(benchStats())}`; }
   if (ssr) ssr.update(clock.elapsedTime, scene.fog.color, tod.day);
   // EffectComposer never resets its ping-pong pair: with an odd number of swapping passes (NaN guard + SSR + Output = 3) the scene alternated
   // between rt2 (has the depth texture) and rt1 (doesn't) every frame, so SSR saw fresh depth only on every other frame -> flicker.
