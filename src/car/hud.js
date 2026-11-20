@@ -7,15 +7,15 @@ const CSS = `
 #drv .gear{display:inline-block;min-width:34px;text-align:center;margin-right:10px;padding:2px 8px;border-radius:6px;background:rgba(255,255,255,.14);font-size:24px;font-weight:800}
 #drv .rpmbar{margin-top:8px;display:flex;gap:2px;justify-content:flex-end}
 #drv .rpmbar i{display:block;width:9px;height:14px;border-radius:2px;background:rgba(255,255,255,.14)}
-#drv .rpmbar i.on{background:#52e0ff}#drv .rpmbar i.on.hi{background:#ffd34d}#drv .rpmbar i.on.red{background:#ff4a6e}
+#drv .rpmbar i.on{background:rgba(255,255,255,.6)}#drv .rpmbar i.on.hi{background:rgba(255,255,255,.85)}#drv .rpmbar i.on.red{background:#fff;box-shadow:0 0 8px rgba(255,255,255,.8)}
 #drv .flags{margin-top:8px;display:flex;gap:6px;justify-content:flex-end}
 #drv .flags b{padding:2px 7px;border-radius:5px;background:rgba(255,255,255,.1);opacity:.4;font-size:11px;letter-spacing:.08em}
-#drv .flags b.on{opacity:1;background:#ff3fa6;color:#fff}
+#drv .flags b.on{opacity:1;background:#fff;color:#000}
 #drv .score{position:absolute;left:50%;top:22px;transform:translateX(-50%);text-align:center;min-width:300px}
 #drv .score .pts{font-size:46px;font-weight:800;line-height:1;transition:transform .08s}
-#drv .score .mult{font-size:18px;color:#ffd34d}
+#drv .score .mult{font-size:18px;color:#fff;opacity:.7}
 #drv .score .ang{font-size:13px;opacity:.85;margin-top:2px}
-#drv .score .msg{height:18px;margin-top:4px;font-size:15px;color:#7fe3ff;letter-spacing:.1em}
+#drv .score .msg{height:18px;margin-top:4px;font-size:15px;color:#fff;letter-spacing:.1em}
 #drv .score.idle .pts,#drv .score.idle .mult,#drv .score.idle .ang{opacity:.25}
 #drv .total{position:absolute;left:22px;top:20px;text-align:left;opacity:.9}
 #drv .total div{font-size:12px;opacity:.7}#drv .total b{font-size:22px}
@@ -36,7 +36,7 @@ export function createHud() {
       <div class="rpmbar" id="d_rpm">${'<i></i>'.repeat(SEG)}</div>
       <div class="flags"><b id="f_asst">ASSIST</b><b id="f_abs">ABS</b><b id="f_auto">AUTO</b><b id="f_hb">E-BRAKE</b><b id="f_cam">CHASE</b></div></div>
     <div class="help"><kbd>W</kbd><kbd>S</kbd> gas / brake·reverse &nbsp; <kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>Space</kbd> handbrake &nbsp; <kbd>Shift</kbd> clutch-kick<br>
-      <kbd>E</kbd><kbd>Q</kbd> gear (manual) &nbsp; <kbd>M</kbd> auto/manual &nbsp; <kbd>G</kbd> assist &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>R</kbd> respawn &nbsp; <kbd>P</kbd> paint &nbsp; <kbd>J</kbd> teleport (streets) &nbsp; <kbd>L</kbd> lights &nbsp; <kbd>F2</kbd> sound &nbsp; <kbd>Tab</kbd> free camera</div>
+      <kbd>E</kbd><kbd>Q</kbd> gear (manual) &nbsp; <kbd>M</kbd> auto/manual &nbsp; <kbd>G</kbd> assist &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>R</kbd> respawn &nbsp; <kbd>P</kbd> paint &nbsp; <kbd>F</kbd> map / search / GPS &nbsp; <kbd>X</kbd> cancel route &nbsp; <kbd>J</kbd> quick teleport &nbsp; <kbd>L</kbd> lights &nbsp; <kbd>F2</kbd> sound &nbsp; <kbd>Tab</kbd> free camera</div>
     <div class="toast" id="d_toast"></div>`;
   document.body.appendChild(root);
   const $ = id => root.querySelector('#' + id);

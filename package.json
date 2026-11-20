@@ -13,10 +13,12 @@
     "build:props": "node tools/build-props.mjs",
     "data:far": "node tools/fetch-far.mjs",
     "build:tiles": "node tools/build-tiles.mjs",
-    "build:all": "node tools/build-landmarks.mjs && node tools/build-map.mjs && node tools/build-tiles.mjs && node tools/build-props.mjs && node tools/build-car.mjs",
+    "build:all": "node tools/build-landmarks.mjs && node tools/build-map.mjs && node tools/build-tiles.mjs && node tools/build-props.mjs && node tools/build-car.mjs && node tools/build-nav.mjs",
     "build:textures": "node tools/build-textures.mjs",
     "build:car": "node tools/build-car.mjs",
-    "sim:car": "node tools/sim-car.mjs"
+    "sim:car": "node tools/sim-car.mjs",
+    "build:nav": "node tools/build-nav.mjs",
+    "test:nav": "node tools/test-nav.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
@@ -28,7 +30,8 @@
     "meshoptimizer": "^1.3.0",
     "pngjs": "^7.0.0",
     "sharp": "^0.35.5",
-    "three": "^0.187.0"
+    "three": "^0.187.0",
+    "trystero": "^0.27.0"
   },
   "devDependencies": {
     "vite": "^8.3.8"

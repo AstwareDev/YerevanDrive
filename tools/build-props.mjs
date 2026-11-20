@@ -261,7 +261,30 @@ const nOsm = trees.length;
   console.log('trees: osm', nOsm, '+ aerial', added, 'bushes', bushes.length);
   var aerialBushes = bushes;
 }
-let treeCap = 8000;
+// ---- Orbeli Brothers St: rows of mature plane trees on both pavements (Street View shows an almost continuous canopy; the aerial detector misses most of it)
+{
+  let nRow = 0; const rr = mkRng(9137);
+  for (const e of osm.elements) {
+    if (e.type !== 'way' || !e.geometry || !e.tags?.highway || !/orbeli/i.test(e.tags['name:en'] || '')) continue;
+    const pl = e.geometry.map(g => project(g.lat, g.lon));
+    for (let i = 1; i < pl.length; i++) {
+      const a = pl[i - 1], b = pl[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue;
+      const ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L;
+      for (const side of [-1, 1]) for (let s = rr() * 6; s < L; s += 9 + rr() * 5) {
+        const off = side * (10.2 + rr() * 2.2), x = a[0] + ux * s - uz * off, z = a[1] + uz * s + ux * off, rad = 3.6 + rr() * 1.8;
+        if (at(occB, x, z) || at(occR, x, z) || at(occW, x, z) || crowded(x, z, 0.75, rad)) continue;
+        trees.push([x, z, rr() < 0.8 ? 0 : 1, rad, 11 + rr() * 5, rr() * 6.283, rr()]); addGrid(x, z, rad * 0.7); nRow++;
+      }
+    }
+  }
+  // BISA front yard (strip frame from tools/build-orbeli.mjs: B, u, n; s along the frontage, d into the block): big trees on both sides of the entrance
+  const OB = [-1619.88, -1800.71], Ou = [0.88952, -0.4569], On = [0.4569, 0.88952];
+  for (const [ss, dd, rad, ht] of [[43.6, 1.4, 4.8, 14], [57.6, 1.2, 4.4, 13], [36.5, 1.0, 5.2, 15.5]]) {
+    const x = OB[0] + Ou[0] * ss - On[0] * dd, z = OB[1] + Ou[1] * ss - On[1] * dd; trees.push([x, z, 0, rad, ht, rr() * 6.283, rr()]); addGrid(x, z, rad * 0.7); nRow++;
+  }
+  console.log('orbeli street trees', nRow);
+}
+let treeCap = +(process.env.TREE_CAP || 40000);
 if (trees.length > treeCap) { console.log('trimming trees', trees.length, '->', treeCap); const keep = trees.slice(0, nOsm), extra = trees.slice(nOsm).sort((a, b) => b[3] - a[3]).slice(0, treeCap - nOsm); trees.length = 0; trees.push(...keep, ...extra); }
 const bushes = []; // [x,z,kind,rad,rot,tint]  kind 0 round bush, 1 hedge segment (length rad), 2 conifer shrub
 for (const [x, z, r, tn] of aerialBushes.slice(0, 5000)) bushes.push([x, z, rngT() < 0.15 ? 2 : 0, r, rngT() * 6.283, tn]);

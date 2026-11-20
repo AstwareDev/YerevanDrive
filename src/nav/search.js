@@ -1,6 +1,6 @@
 // Offline geocoder over the OSM data baked into nav.json: streets, named places (POIs), and "street + house number" addresses.
 // Matches Armenian / English / Russian names, tolerant of transliteration variants (Baghramyan = Bagramyan) and small typos.
-// Optional online fallback (OpenStreetMap Nominatim) for things outside the baked area: only on an explicit Enter press.
+// Optional online fallback (Photon / OpenStreetMap) for things the baked data lacks: only on an explicit Enter press.
 import { CENTER } from './geo.js';
 
 // folded key: lower-case, no diacritics, and the usual Armenian->Latin spelling variants collapsed (gh=g, kh=k, ts=c, ch=c, sh=s, zh=j, ...)
@@ -47,7 +47,7 @@ export class Search {
     this.pois = j.pois.map(p => {
       const nk = nameKeys[p[0]], cat = j.cats[p[1]];
       const addr = p[4] >= 0 ? `${nameKeys[p[4]].en} ${p[5]}`.trim() : '';
-      return { kind: 'poi', ni: p[0], x: p[2], z: p[3], cat, title: nk.en, sub: [catLabel(cat), addr].filter(Boolean).join(' · '), keys: nk.keys };
+      return { kind: 'poi', ni: p[0], x: p[2], z: p[3], cat, title: nk.en, sub: [catLabel(cat), addr].filter(Boolean).join(' · '), keys: [...nk.keys, fold(catLabel(cat))] };     // the category word is searchable too ("metro", "hotel")
     });
     // addresses grouped per street-name index: [{num, x, z, name?}]
     this.addr = new Map(j.addr.map(a => [a[0], a[1].map(r => ({ num: r[0], x: r[1], z: r[2], name: r[3] }))]));
@@ -97,7 +97,9 @@ export class Search {
       }
     }
     res.sort((a, b) => b.score - a.score || Math.hypot(a.x - ox, a.z - oz) - Math.hypot(b.x - ox, b.z - oz));
-    return res.slice(0, limit);
+    const seenT = new Set(), out = [];
+    for (const r of res) { const k = r.kind + r.title; if (r.kind !== 'address' && seenT.has(k)) continue; seenT.add(k); out.push(r); }
+    return out.slice(0, limit);
   }
   /** category chip -> nearest matching places */
   chip(i, ox, oz, limit = 8) {
@@ -117,10 +119,12 @@ export class Search {
   }
 }
 
-/** OpenStreetMap Nominatim, only when asked (Enter) and when the local index is not enough. */
+/** Online fallback (Photon geocoder over OpenStreetMap data), only when asked (Enter) and when the local index has no match. */
 export async function onlineSearch(q, signal) {
-  const dLat = 0.09, dLon = 0.12;
-  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=en&addressdetails=0&viewbox=' + [CENTER.lon - dLon, CENTER.lat + dLat, CENTER.lon + dLon, CENTER.lat - dLat].join(',') + '&bounded=1&q=' + encodeURIComponent(q.includes('Yerevan') ? q : q + ', Yerevan');
-  const r = await fetch(url, { signal, headers: { Accept: 'application/json' } }); if (!r.ok) throw new Error('geocoder ' + r.status);
-  return (await r.json()).map(o => ({ kind: 'online', title: o.name || o.display_name.split(',')[0], sub: o.display_name.split(',').slice(0, 3).join(',').trim(), lat: +o.lat, lon: +o.lon, score: 0.1 }));
+  const url = 'https://photon.komoot.io/api/?limit=6&lang=en&bbox=44.36,40.07,44.66,40.28&lat=' + CENTER.lat + '&lon=' + CENTER.lon + '&q=' + encodeURIComponent(q);
+  const r = await fetch(url, { signal }); if (!r.ok) throw new Error('geocoder ' + r.status);
+  return ((await r.json()).features ?? []).map(f => {
+    const p = f.properties, [lon, lat] = f.geometry.coordinates, street = [p.street, p.housenumber].filter(Boolean).join(' ');
+    return { kind: 'online', title: p.name || street || 'Place', sub: [p.name && street, p.district, p.city].filter(Boolean).join(', '), lat, lon, score: 0.1 };
+  });
 }

@@ -2,7 +2,7 @@
 // view = { cx, cz, mpp, rot }  world centre (metres), metres per CSS pixel, rotation (radians, 0 = north up; heading-up uses rot = heading - PI)
 // All geometry comes from nav.json (roads, buildings, parks, water) + the satellite mosaic for the optional photo basemap.
 const STYLE = {
-  dark: { bg: '#0e1522', green: '#13281f', water: '#102a43', bld: '#1b2538', bldLine: '#2a3752', casing: '#080c14', text: '#cfd8ea', halo: 'rgba(8,12,20,.85)' },
+  dark: { bg: '#0e1522', green: '#13281f', water: '#102a43', bld: '#222f48', bldLine: '#34456b', casing: '#080c14', text: '#cfd8ea', halo: 'rgba(8,12,20,.85)' },
 };
 //                 fill      width(m) minPx casingPx
 const ROAD = [['#ffa45c', 17, 3.2, 1.6], ['#ffb26a', 16, 3.2, 1.6], ['#f5d98f', 15, 3, 1.5], ['#ece6cf', 12, 2.6, 1.4], ['#d3dae8', 10, 2.2, 1.2], ['#aab5cb', 8, 1.8, 1.1], ['#8f9bb5', 8, 1.8, 1.1], ['#7f8aa3', 6, 1.4, 1], ['#5b667f', 4.5, 1, 0.9], ['#46516b', 5, 1, 0.8]];
@@ -24,6 +24,19 @@ export class MapRenderer {
     this.buildings = j.buildings.map(r => dec(r, 0));
     this.areas = j.areas.map(r => ({ t: r[0], ...dec(r, 1) }));
     this.labelW = new Map(); this.sat = null; this.satReady = false;
+  }
+  /** all building footprints rendered once into a bitmap (1.6 m per pixel), a slice per idle callback so opening the map never hitches */
+  buildCache(done) {
+    const R = this.nav.region, x0 = R.x0 - 160, z0 = R.z0 - 160, w = R.x1 - R.x0 + 320, h = R.z1 - R.z0 + 320, res = 1.6;
+    const cv = document.createElement('canvas'); cv.width = Math.ceil(w / res); cv.height = Math.ceil(h / res); const g = cv.getContext('2d');
+    g.scale(1 / res, 1 / res); g.translate(-x0, -z0); g.fillStyle = STYLE.dark.bld;
+    let i = 0; const B = this.buildings, step = () => {
+      const end = Math.min(B.length, i + 1500); g.beginPath();
+      for (; i < end; i++) { const b = B[i]; if (Math.max(b.x1 - b.x0, b.z1 - b.z0) < 5) continue; const p = b.p; g.moveTo(p[0], p[1]); for (let k = 2; k < p.length; k += 2) g.lineTo(p[k], p[k + 1]); g.closePath(); }
+      g.fill();
+      if (i < B.length) setTimeout(step, 16); else { this._bc = { cv, x0, z0, w: cv.width * res, h: cv.height * res }; done?.(); }
+    };
+    setTimeout(step, 400);
   }
   loadSat(cb) { if (this.sat) return; const im = this.sat = new Image(); im.onload = () => { this.satReady = true; cb?.(); }; im.src = '/map/nav_aerial.webp'; }
 
@@ -48,20 +61,25 @@ export class MapRenderer {
     else {
       // parks / water
       for (const pass of [0, 1]) { ctx.fillStyle = pass ? S.water : S.green; ctx.beginPath(); for (const a of this.areas) { if (a.t !== pass || !vis(a)) continue; if ((a.x1 - a.x0) * inv < 2 && (a.z1 - a.z0) * inv < 2) continue; const p = a.p; ctx.moveTo(p[0], p[1]); for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1]); ctx.closePath(); } ctx.fill(); }
-      // buildings
-      if (mpp < 5.5) {
-        ctx.fillStyle = S.bld; ctx.beginPath(); let n = 0;
-        for (const b of this.buildings) { if (!vis(b) || (b.x1 - b.x0) * inv < 1.2) continue; const p = b.p; ctx.moveTo(p[0], p[1]); for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1]); ctx.closePath(); n++; }
-        ctx.fill(); if (mpp < 1.6) { ctx.lineWidth = 0.8 * mpp; ctx.strokeStyle = S.bldLine; ctx.stroke(); }
+      // buildings: zoomed out they come from a pre-rendered bitmap (a 12k-polygon fill is slow on software canvases), zoomed in they are vector
+      if (mpp < 4.2) {
+        if (mpp >= 1.0) { const bc = this._bc; if (bc) { ctx.imageSmoothingEnabled = true; ctx.drawImage(bc.cv, bc.x0, bc.z0, bc.w, bc.h); } }
+        else {
+          ctx.fillStyle = S.bld; ctx.beginPath();
+          for (const b of this.buildings) { if (!vis(b) || Math.max(b.x1 - b.x0, b.z1 - b.z0) * inv < 1.5) continue; const p = b.p; ctx.moveTo(p[0], p[1]); for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1]); ctx.closePath(); }
+          ctx.fill(); if (mpp < 0.7) { ctx.lineWidth = 0.8 * mpp; ctx.strokeStyle = S.bldLine; ctx.stroke(); }
+        }
       }
     }
     // roads (low class first)
     const minVisible = (cls) => ROAD[cls][1] * inv >= PX_MAX || ROAD[cls][2] >= 1 && mpp < (cls <= 3 ? 40 : cls <= 6 ? 14 : 5);
     for (let cls = 9; cls >= 0; cls--) {
       if (!minVisible(cls)) continue; const [fill, wm, minPx, casPx] = ROAD[cls]; const list = this.byCls[cls];
+      if (cls === 8 && mpp > 2.6 || cls === 7 && mpp > 4) continue;            // alleys / living streets vanish when zoomed out
+      const thin = cls >= 5 && mpp > 1.4; ctx.lineJoin = thin ? 'bevel' : 'round'; ctx.lineCap = thin ? 'butt' : 'round';
       const w = Math.max(wm * inv, minPx) * mpp;       // world units
       const draw = (width, style) => { ctx.lineWidth = width; ctx.strokeStyle = style; ctx.beginPath(); let any = false; for (const r of list) { if (!vis(r)) continue; if (cls >= 7 && r.flags & 4 && mpp > 2) continue; const p = r.pts; ctx.moveTo(p[0], p[1]); for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1]); any = true; } if (any) ctx.stroke(); };
-      if (!sat) draw(w + casPx * 2 * mpp, S.casing);
+      if (!sat && !thin) draw(w + casPx * 2 * mpp, S.casing);
       draw(sat ? Math.max(w * 0.5, 1.2 * mpp) : w, sat ? 'rgba(255,255,255,.55)' : fill);
     }
     ctx.restore(); ctx.save(); ctx.setTransform(o.dpr ?? 1, 0, 0, o.dpr ?? 1, 0, 0);
@@ -75,7 +93,7 @@ export class MapRenderer {
       const stroke = (i0, w, col) => { ctx.beginPath(); for (let i = i0; i < np; i++) { const [x, y] = proj(rt.pts[i * 2], rt.pts[i * 2 + 1]); i === i0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.lineWidth = w; ctx.strokeStyle = col; ctx.lineJoin = ctx.lineCap = 'round'; ctx.stroke(); };
       const wpx = Math.max(5, Math.min(11, 12 / Math.sqrt(mpp)));
       if (from > 0) { ctx.beginPath(); for (let i = 0; i <= Math.min(np - 1, from); i++) { const [x, y] = proj(rt.pts[i * 2], rt.pts[i * 2 + 1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.lineWidth = wpx; ctx.strokeStyle = 'rgba(120,150,190,.45)'; ctx.stroke(); }
-      stroke(from, wpx + 4, 'rgba(6,16,30,.9)'); stroke(from, wpx, '#37c8ff');
+      stroke(from, wpx + 4, 'rgba(6,16,30,.9)'); stroke(from, wpx, '#ffffff');
     }
     // ---------------------------------------------------------------- labels
     if (o.labels !== false) {
@@ -87,10 +105,7 @@ export class MapRenderer {
       const drawn = new Set();
       for (let cls = 0; cls <= maxCls; cls++) for (const r of this.byCls[cls]) {
         if (r.name < 0 || !vis(r) || drawn.has(r.name * 10 + cls) && mpp > 2.5) continue;
-        if (r.label === undefined) { // longest segment
-          let bl = 0, bi = -1; const p = r.pts; for (let k = 0; k + 3 < p.length; k += 2) { const l = Math.hypot(p[k + 2] - p[k], p[k + 3] - p[k + 1]); if (l > bl) { bl = l; bi = k; } }
-          r.label = bi < 0 ? null : { x: (p[bi] + p[bi + 2]) / 2, z: (p[bi + 1] + p[bi + 3]) / 2, a: Math.atan2(p[bi + 3] - p[bi + 1], p[bi + 2] - p[bi]), len: bl };
-        }
+        if (r.label === undefined) r.label = bestRun(r.pts);
         const L = r.label; if (!L) continue; const txt = this.nav.name(r.name); if (!txt) continue;
         let w0 = this.labelW.get(txt); if (w0 === undefined) { ctx.save(); ctx.font = font(12); w0 = ctx.measureText(txt).width / 12; ctx.restore(); this.labelW.set(txt, w0); }
         const tw = w0 * fpx;
@@ -101,30 +116,55 @@ export class MapRenderer {
         ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.lineWidth = 3.2; ctx.strokeStyle = S.halo; ctx.strokeText(txt, 0, 0); ctx.fillStyle = S.text; ctx.fillText(txt, 0, 0); ctx.restore(); drawn.add(r.name * 10 + cls);
       }
       // places
-      if (o.pois !== false && mpp < 3 && o.search) {
+      if (o.pois !== false && mpp < 3.5 && o.search) {
         ctx.font = font(11, 600); ctx.textAlign = 'left';
         for (const p of o.search.pois) {
           const x = sx(p.x, p.z), y = sy(p.x, p.z); if (x < -20 || y < -20 || x > W + 20 || y > H + 20) continue;
-          const t = p.title, tw = t.length * 5.6; if (!free(x - 5, y - 6, tw + 12, 13)) continue;
-          ctx.beginPath(); ctx.arc(x, y, 3.4, 0, 7); ctx.fillStyle = p.cat === 'metro' ? '#ff5d7a' : /park|garden/.test(p.cat) ? '#5fd38a' : '#7fb2ff'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = '#06101c'; ctx.stroke();
-          ctx.lineWidth = 3; ctx.strokeStyle = S.halo; ctx.strokeText(t, x + 7, y); ctx.fillStyle = '#e6edf9'; ctx.fillText(t, x + 7, y);
+          const t = p.title, tw = t.length * 5.6, showText = mpp < 1.7 || p.cat === 'metro'; if (!free(x - 5, y - 6, showText ? tw + 12 : 10, 13)) continue;
+          ctx.beginPath(); ctx.arc(x, y, 3.4, 0, 7); ctx.fillStyle = p.cat === 'metro' ? '#ffffff' : /park|garden/.test(p.cat) ? '#5fd38a' : '#7fb2ff'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = '#06101c'; ctx.stroke();
+          if (!showText) continue; ctx.lineWidth = 3; ctx.strokeStyle = S.halo; ctx.strokeText(t, x + 7, y); ctx.fillStyle = '#e6edf9'; ctx.fillText(t, x + 7, y);
         }
       }
     }
     // ---------------------------------------------------------------- markers
     if (o.dest) { const [x, y] = proj(o.dest.x, o.dest.z); marker(ctx, x, y, '#2fd27a', true); }
     if (o.pin) { const [x, y] = proj(o.pin.x, o.pin.z); marker(ctx, x, y, '#ff4d6d', false); }
+    for (const pl of o.players ?? []) {       // other drivers (multiplayer)
+      const [x, y] = proj(pl.x, pl.z); if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
+      const fx = Math.sin(pl.heading) * c - Math.cos(pl.heading) * s, fy = Math.sin(pl.heading) * s + Math.cos(pl.heading) * c;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(fy, fx) + Math.PI / 2);
+      ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(6.5, 7); ctx.lineTo(0, 3.5); ctx.lineTo(-6.5, 7); ctx.closePath(); ctx.fillStyle = pl.color; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.restore();
+      if (o.playerLabels) { ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(8,12,20,.9)'; ctx.strokeText(pl.name, x + 11, y); ctx.fillStyle = '#fff'; ctx.fillText(pl.name, x + 11, y); }
+    }
     if (o.car) {
       const [x, y] = proj(o.car.x, o.car.z);
       // forward (sin h, cos h) in world -> screen
       const fx = Math.sin(o.car.heading) * c - Math.cos(o.car.heading) * s, fy = Math.sin(o.car.heading) * s + Math.cos(o.car.heading) * c, ang = Math.atan2(fy, fx) + Math.PI / 2;
       ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
       ctx.beginPath(); ctx.arc(0, 0, 15, 0, 7); ctx.fillStyle = 'rgba(55,140,255,.2)'; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(8, 9); ctx.lineTo(0, 4.5); ctx.lineTo(-8, 9); ctx.closePath(); ctx.fillStyle = '#3d8bff'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.restore();
+      ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(8, 9); ctx.lineTo(0, 4.5); ctx.lineTo(-8, 9); ctx.closePath(); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.restore();
     }
     ctx.restore();
     return { sx, sy, toWorld: (qx, qy) => { const u = (qx - px) * mpp, v = (qy - py) * mpp; return [cx + u * c + v * s, cz - u * s + v * c]; } };
   }
+}
+
+/** longest nearly-straight run of a polyline -> label anchor (midpoint by arc length, chord angle, run length) */
+function bestRun(p) {
+  const n = p.length / 2; if (n < 2) return null; let best = null, bl = 0, i = 0;
+  while (i < n - 1) {
+    const a0 = Math.atan2(p[i * 2 + 3] - p[i * 2 + 1], p[i * 2 + 2] - p[i * 2]); let j = i, len = 0;
+    while (j < n - 1) {
+      const dx = p[j * 2 + 2] - p[j * 2], dz = p[j * 2 + 3] - p[j * 2 + 1], l = Math.hypot(dx, dz); if (l < 0.01) { j++; continue; }
+      let da = Math.atan2(dz, dx) - a0; da = Math.atan2(Math.sin(da), Math.cos(da)); if (Math.abs(da) > 0.3) break; len += l; j++;
+    }
+    if (j === i) j = i + 1;
+    if (len > bl) { bl = len; best = [i, j, len]; }
+    i = j;
+  }
+  if (!best) return null; const [a, b, len] = best; let acc = 0, x = p[a * 2], z = p[a * 2 + 1];
+  for (let k = a; k < b; k++) { const l = Math.hypot(p[k * 2 + 2] - p[k * 2], p[k * 2 + 3] - p[k * 2 + 1]); if (acc + l >= len / 2) { const t = (len / 2 - acc) / (l || 1); x = p[k * 2] + (p[k * 2 + 2] - p[k * 2]) * t; z = p[k * 2 + 1] + (p[k * 2 + 3] - p[k * 2 + 1]) * t; break; } acc += l; }
+  return { x, z, a: Math.atan2(p[b * 2 + 1] - p[a * 2 + 1], p[b * 2] - p[a * 2]), len };
 }
 
 function marker(ctx, x, y, col, flag) {

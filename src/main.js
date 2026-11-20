@@ -85,7 +85,7 @@ composer.addPass(new OutputPass());
 
 // ------------------------------------------------------------ loading
 const { M, T } = createMaterials(renderer);
-const progress = (txt, p) => { $('loadtxt').textContent = txt; $('loadbar').style.width = (p * 100).toFixed(0) + '%'; };
+const progress = (txt, p) => { $('loadtxt').textContent = txt; $('loadbar').style.width = (p * 100).toFixed(0) + '%'; $('loadpct').textContent = (p * 100).toFixed(0) + '%'; };
 progress('Loading metadata…', 0.02);
 const meta = await (await fetch('/map/meta.json')).json();
 // fallbacks for materials introduced by the generator (the PBR pass may define better ones in materials.js)
@@ -160,7 +160,7 @@ const pluginUpdates = [];
 // shared with the car plug-in (src/car.js): drive mode takes over the camera, `focus` feeds the shadow frustum / lamp lights
 const drive = { active: false, wanted: false, uiLock: false, focus: new THREE.Vector3(), set(v) { setMode(v ? 'drive' : 'orbit'); } };
 {
-  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js']);
+  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js', './mp.js', './orbeli.js']);
   const wantCircuits = new URLSearchParams(location.search).get('circuits') === '1';     // the race circuits are off by default: free roam (?circuits=1 restores them)
   for (const [path, load] of Object.entries(found)) {
     if (path.endsWith('circuits.js') && !wantCircuits) continue;

@@ -60,6 +60,21 @@ The map now has a playable drift car (BMW G87 M2 widebody). It starts on the *Re
 `car/audio.js` cross-fades them by rpm and pitches them with `playbackRate`, and keeps the synthesized engine underneath so the pitch stays exact. Raw downloads are in `data/audio_raw/`.
 Parked cars are off by default (clear roads); `?cars=1` restores them and their colliders.
 
+## Multiplayer + deploying to Netlify
+Every browser tab is a player; everyone sees everyone's car (ghost cars, no player-vs-player collisions), name tags, an *ONLINE* list (click your own row to rename) and the other drivers on the minimap / map.
+`src/mp.js` sends the car state at 15 Hz over serverless WebRTC (Trystero; public Nostr relays are only used to find peers) plus a BroadcastChannel for tabs of the same browser, so **no backend is needed**. Default room is `public`; `?room=friends` makes a private one, `?mp=0` turns it off.
+Deploy: `npm run build` then upload `dist/` (`netlify deploy --prod --dir=dist`, or connect the repo: `netlify.toml` is included). The site is ~235 MB of baked map data, mostly streamed on demand.
+Limits: players behind strict NATs/corporate firewalls may not connect (no TURN server); works well up to roughly 10-15 drivers per room (full mesh).
+
+## Map, search & GPS navigator
+Press **F** (or the *Map* button) at any time:
+
+* **Search** an address, street, house number (`Abovyan 12`), or a place (`Cascade`, `metro`); Armenian, English and Russian names all work and spelling variants (Baghramyan / Bagramyan) are tolerated. Category chips list the nearest metro stations, food, parks, hotels, shops, culture. *Enter* with no local match falls back to the Photon geocoder over OpenStreetMap (online, only on Enter; the typed text is the only thing sent).
+* The result is shown on the **2D map** (dark vector map or satellite, pan / zoom / click to drop a pin) **and in the 3D world** as a light beam + floating label.
+* **Navigate** starts turn-by-turn guidance from the car: heading-up minimap, turn card (arrow, distance, street, remaining distance / ETA), a glowing route ribbon painted on the road ahead, voice prompts (toggle in the map panel), automatic re-routing. **X** cancels the route. **Teleport car** drops the car on the nearest road; **View in 3D** flies the free camera there (Tab returns to the car).
+
+Data: `node tools/build-nav.mjs` -> `public/map/nav.json` (road graph, search index, footprints) and `public/map/nav_aerial.webp` (satellite basemap). Code: `src/nav.js` (plug-in), `src/nav/{data,search,mapview,world3d,ui,geo}.js`. `node tools/test-nav.mjs` checks routing headlessly.
+
 ## Extended city (free-drive region)
 
 The full-detail (L0) map is no longer 2 km x 2 km: `REGION` in `tools/config.mjs` (x -2560..1024, z -3584..1024, tile aligned) covers Republic Square plus

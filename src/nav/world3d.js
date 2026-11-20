@@ -4,10 +4,10 @@ const STEP = 4, WIN = 170, BACK = 3;           // resample step (m), ribbon wind
 export function createWorld3D({ THREE, scene, groundY }) {
   // ------------------------------------------------------------------ ribbon
   const cv = document.createElement('canvas'); cv.width = 64; cv.height = 128; const g = cv.getContext('2d');
-  g.fillStyle = 'rgba(30,150,255,.40)'; g.fillRect(0, 0, 64, 128);
-  g.fillStyle = 'rgba(255,255,255,.95)'; g.strokeStyle = 'rgba(190,240,255,1)';
-  g.beginPath(); g.moveTo(8, 100); g.lineTo(32, 64); g.lineTo(56, 100); g.lineTo(56, 118); g.lineTo(32, 84); g.lineTo(8, 118); g.closePath(); g.fill();   // chevron (points towards +v = travel direction)
-  g.fillStyle = 'rgba(160,230,255,.9)'; g.fillRect(0, 0, 5, 128); g.fillRect(59, 0, 5, 128);
+  g.fillStyle = 'rgba(30,140,255,.26)'; g.fillRect(0, 0, 64, 128);
+  g.fillStyle = 'rgba(215,245,255,.92)';
+  g.beginPath(); g.moveTo(10, 96); g.lineTo(32, 66); g.lineTo(54, 96); g.lineTo(54, 110); g.lineTo(32, 82); g.lineTo(10, 110); g.closePath(); g.fill();   // chevron (points towards +v = travel direction)
+  g.fillStyle = 'rgba(150,220,255,.85)'; g.fillRect(0, 0, 4, 128); g.fillRect(60, 0, 4, 128);
   const tex = new THREE.CanvasTexture(cv); tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(WIN * 2 * 3), uv = new Float32Array(WIN * 2 * 2), col = new Float32Array(WIN * 2 * 4), idx = new Uint16Array((WIN - 1) * 6);
@@ -35,13 +35,13 @@ export function createWorld3D({ THREE, scene, groundY }) {
   function updateRibbon(s, dt) {
     if (count < 2) return;
     const i0 = Math.max(0, Math.floor(s / STEP) - BACK), n = Math.min(WIN, count - i0); if (n < 2) { geo.setDrawRange(0, 0); return; }
-    const hw = 1.55;
+    const hw = 1.15;
     for (let k = 0; k < n; k++) {
       const i = i0 + k, j0 = Math.max(0, i - 1), j1 = Math.min(count - 1, i + 1);
       let dx = RX[j1] - RX[j0], dz = RZ[j1] - RZ[j0]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
       const nx = -dz * hw, nz = dx * hw, y = RY[i] + 0.2;
       pos[k * 6] = RX[i] + nx; pos[k * 6 + 1] = y; pos[k * 6 + 2] = RZ[i] + nz; pos[k * 6 + 3] = RX[i] - nx; pos[k * 6 + 4] = y; pos[k * 6 + 5] = RZ[i] - nz;
-      const v = i * STEP / 7 + scroll; uv[k * 4] = 0; uv[k * 4 + 1] = v; uv[k * 4 + 2] = 1; uv[k * 4 + 3] = v;
+      const v = i * STEP / 5 + scroll; uv[k * 4] = 0; uv[k * 4 + 1] = v; uv[k * 4 + 2] = 1; uv[k * 4 + 3] = v;
       const fadeNear = Math.min(1, (i * STEP - s + 6) / 10), fadeFar = Math.min(1, (n - 1 - k) / 14), a = Math.max(0, Math.min(fadeNear, fadeFar));
       for (let q = 0; q < 2; q++) { const o = (k * 2 + q) * 4; col[o] = 1; col[o + 1] = 1; col[o + 2] = 1; col[o + 3] = a; }
     }

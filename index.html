@@ -5,16 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Yerevan Drift — Republic Square map</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0b0710; overflow: hidden; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #cfd3e6; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #cfd3e6; }
   canvas { display: block; }
   #hud { position: fixed; left: 14px; top: 14px; padding: 10px 12px; background: rgba(8,6,16,.62); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; backdrop-filter: blur(6px); pointer-events: none; }
   #hud.hidden { display: none; }
-  #hud b { color: #ff7ac8; letter-spacing: .08em; }
-  #hud .k { color: #7fe3ff; }
-  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0710; transition: opacity .8s; }
-  #loading.done { opacity: 0; pointer-events: none; }
-  #loadbox { width: 320px; text-align: center; }
-  #loadbar { height: 3px; width: 0; background: linear-gradient(90deg,#ff3fa6,#42d9ff); transition: width .2s; margin-top: 10px; }
+  #hud b { color: #fff; letter-spacing: .12em; }
+  #hud .k { color: #fff; padding: 0 5px; border-radius: 4px; background: rgba(255,255,255,.14); }
+  #loading { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; justify-content: space-between; padding: 40px 48px; box-sizing: border-box; background: #000; color: #fff; transition: opacity .9s ease, visibility .9s; }
+  #loading.done { opacity: 0; visibility: hidden; pointer-events: none; }
+  #loading .top { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: .25em; text-transform: uppercase; opacity: .55; }
+  #loading h1 { margin: 0; font: 800 clamp(44px, 9vw, 120px)/.92 system-ui, 'Segoe UI', sans-serif; letter-spacing: -.04em; text-transform: uppercase; }
+  #loading h1 span { display: block; color: transparent; -webkit-text-stroke: 1.5px #fff; }
+  #loading .bot { display: flex; align-items: flex-end; gap: 24px; }
+  #loading .stat { flex: 1; }
+  #loadtxt { font-size: 11px; letter-spacing: .22em; text-transform: uppercase; opacity: .6; margin-bottom: 14px; }
+  #loadtrack { height: 2px; background: rgba(255,255,255,.16); overflow: hidden; }
+  #loadbar { height: 100%; width: 0; background: #fff; transition: width .25s ease; }
+  #loadpct { font: 300 clamp(40px, 6vw, 84px)/1 system-ui, 'Segoe UI', sans-serif; letter-spacing: -.03em; font-variant-numeric: tabular-nums; min-width: 2.6ch; text-align: right; }
   .attr { position: fixed; right: 10px; bottom: 6px; font-size: 10px; opacity: .55; }
 </style>
 </head>
@@ -23,9 +30,13 @@
   <b>YEREVAN · REPUBLIC SQUARE</b> &nbsp; <span id="mode">ORBIT</span> · <span id="fps"></span><br />
   <span id="stats"></span><br />
   <span class="k">1</span> orbit &nbsp;<span class="k">2</span> fly (drag, WASD, Q/E, Shift, wheel) &nbsp;<span class="k">3</span> drive tour &nbsp;<span class="k">N</span> next road<br />
-  <span class="k">T</span> day/night &nbsp;<span class="k">R</span> wet/dry &nbsp;<span class="k">B</span> bloom &nbsp;<span class="k">H</span> hide this
+  <span class="k">T</span> day/night &nbsp;<span class="k">R</span> wet/dry &nbsp;<span class="k">B</span> bloom &nbsp;<span class="k">F</span> map / search &nbsp;<span class="k">H</span> hide this
 </div>
-<div id="loading"><div id="loadbox"><div id="loadtxt">Loading…</div><div style="height:3px;background:#1d1830;margin-top:10px"><div id="loadbar"></div></div></div></div>
+<div id="loading">
+  <div class="top"><span>Republic Square</span><span>40.1776° N &nbsp; 44.5126° E</span></div>
+  <h1>Yerevan<span>Drift</span></h1>
+  <div class="bot"><div class="stat"><div id="loadtxt">Loading…</div><div id="loadtrack"><div id="loadbar"></div></div></div><div id="loadpct">0%</div></div>
+</div>
 <div class="attr">Map data © OpenStreetMap contributors (ODbL) · Elevation: Mapzen/AWS Terrain Tiles</div>
 <script type="module" src="/src/main.js"></script>
 </body>

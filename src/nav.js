@@ -37,7 +37,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
   (async () => {
     try {
       const j = await (await fetch('/map/nav.json')).json();
-      nav = new Nav(j); search = new Search(nav); mapper = new MapRenderer(nav);
+      nav = new Nav(j); search = new Search(nav); mapper = new MapRenderer(nav); mapper.buildCache(() => { dirty = true; });
       buildChips(); renderList(); dirty = true; console.log(`[nav] ready: ${nav.N} nodes, ${nav.E} edges, ${search.all.length} places`);
     } catch (e) { loadErr = e; console.error('[nav] data failed', e); }
   })();
@@ -52,7 +52,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
   function drawMap() {
     if (!mapper) { ctx2.fillStyle = '#0e1522'; ctx2.fillRect(0, 0, cvs.width, cvs.height); ctx2.fillStyle = '#8d9bbd'; ctx2.font = '16px system-ui'; ctx2.fillText(loadErr ? 'Map data failed to load' : 'Loading map data…', 40, 60); return; }
     const c = carState();
-    xf = mapper.draw(ctx2, CW, CH, view, { dpr, satellite: sat, route, routeFrom: route ? prog.idx : 0, car: c, pin: sel, dest: dest, search });
+    xf = mapper.draw(ctx2, CW, CH, view, { dpr, satellite: sat, route, routeFrom: route ? prog.idx : 0, car: c, pin: sel, dest: dest, search, players: drive.players, playerLabels: true });
     // scale bar
     const nice = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000]; let L = nice[0]; for (const n of nice) if (n / view.mpp <= 130) L = n;
     ui.scale.innerHTML = `${L >= 1000 ? L / 1000 + ' km' : L + ' m'}<i style="width:${(L / view.mpp).toFixed(0)}px;margin-left:auto"></i>`;
@@ -101,7 +101,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
     let h = '';
     if (listMode === 'results') {
       h += results.length ? (chipTitle ? `<div class="nv-h">${esc(chipTitle)} near you</div>` : '') + results.map(rowHTML).join('')
-        : `<div class="nv-empty">No match in the offline map data.<br>${ui.q.value.trim().length >= 3 ? 'Press <b>Enter</b> to search online (OpenStreetMap Nominatim).' : 'Try a street name, a house number (“Abovyan 12”) or a place.'}</div>`;
+        : `<div class="nv-empty">No match in the offline map data.<br>${ui.q.value.trim().length >= 3 ? 'Press <b>Enter</b> to search online (Photon / OpenStreetMap).' : 'Try a street name, a house number (“Abovyan 12”) or a place.'}</div>`;
     } else {
       const home = places.map(p => ({ kind: 'place', title: p.name, sub: 'Quick place', x: p.x, z: p.z, cat: p.name.includes('Metro') ? 'metro' : '' }));
       results = [...home, ...recents.map(r => ({ ...r, sub: (r.sub ? r.sub + ' · ' : '') + 'Recent' }))];
@@ -229,7 +229,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
     // minimap
     if (driving && !open && c && (miniT -= dt) <= 0) {
       miniT = 1 / 30; const target = 0.6 + c.speed * 0.034; miniMpp += (target - miniMpp) * 0.12; const rot = c.heading - Math.PI;
-      mapper.draw(mctx, MINI, MINI, { cx: c.x, cz: c.z, mpp: miniMpp, rot }, { dpr: mc.dpr, anchorY: 0.62, route, routeFrom: route ? prog.idx : 0, car: c, pois: false, dest, search: null });
+      mapper.draw(mctx, MINI, MINI, { cx: c.x, cz: c.z, mpp: miniMpp, rot }, { dpr: mc.dpr, anchorY: 0.62, route, routeFrom: route ? prog.idx : 0, car: c, pois: false, dest, search: null, players: drive.players });
       if ((streetT -= 1 / 30) <= 0) { streetT = 0.5; ui.street.textContent = nav.streetAt(c.x, c.z, 40) || '—'; }
       ui.mini.firstElementChild.nextElementSibling.style.cssText = `left:${(122 + 106 * Math.sin(rot)).toFixed(1)}px;top:${(122 - 106 * Math.cos(rot)).toFixed(1)}px;transform:translate(-50%,-50%)`;
     }
@@ -250,6 +250,6 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
     } else tag.style.display = 'none';
   }
 
-  window.__nav = { get nav() { return nav; }, get search() { return search; }, get route() { return route; }, get prog() { return prog; }, select, setOpen, navigateTo, teleportTo, show3D, view, clearRoute, w3, ui, get sel() { return sel; }, setLayer };
+  window.__nav = { get nav() { return nav; }, get mapper() { return mapper; }, get search() { return search; }, get route() { return route; }, get prog() { return prog; }, select, setOpen, navigateTo, teleportTo, show3D, view, clearRoute, w3, ui, get sel() { return sel; }, setLayer };
   return { update };
 }

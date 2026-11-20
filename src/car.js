@@ -96,6 +96,7 @@ export default async function car(ctx) {
   let spawn = { x: 0, z: 40, heading: Math.PI };
   { const c0 = circuitsData[0]; if (c0) { const p = c0.points; let bi = 0, bd = 1e9; for (let i = 0; i < p.length / 3 - 8; i += 3) { const d = Math.hypot(p[i * 3], p[i * 3 + 2]); if (d < bd) { bd = d; bi = i; } } spawn = { x: p[bi * 3], y: p[bi * 3 + 1], z: p[bi * 3 + 2], heading: Math.atan2(p[(bi + 6) * 3] - p[bi * 3], p[(bi + 6) * 3 + 2] - p[bi * 3 + 2]) }; } }
   if (circuitsOn && circuitsData[0]?.spawns?.[0]) spawn = circuitsData[0].spawns[0];
+  { const o = Math.random() * 16; spawn = { ...spawn, x: spawn.x - Math.sin(spawn.heading) * o, z: spawn.z - Math.cos(spawn.heading) * o }; }      // multiplayer: stagger the start so tabs don't spawn on top of each other
   const places = [{ name: 'Republic Square', x: spawn.x, z: spawn.z, heading: spawn.heading }, ...(meta.places ?? [])]; let placeIdx = 0;
   let safe = { x: spawn.x, z: spawn.z, y: spawn.y ?? null, heading: spawn.heading }, safeT = 0;
   function respawn(to = safe) { vehicle.reset(to.x, to.z, to.heading, to.y); colliders.prime(to.x, to.z); input.reset(); cam.reset(); skidsClear(); hud.resetScore(); }
@@ -192,7 +193,36 @@ export default async function car(ctx) {
   }
 
   console.log(`[car] ready in ${(performance.now() - t0).toFixed(0)} ms, spawn`, spawn);
-  drive.car = { vehicle, ground, hud, teleport: (x, z, heading) => respawn({ x, z, y: null, heading }) };       // public API for the map / navigator (src/nav.js)
+  // ------------------------------------------------------------------ multiplayer hooks (src/mp.js): net state of the local car + clones of the model for remote players
+  const wheelAvg = front => { let a = 0, n = 0; for (const w of vehicle.wheels) if (!!w.front === front) { a += w.omega; n++; } return n ? a / n : 0; };
+  function makeRemote(pi = 0) {
+    const g = new THREE.Group(); g.name = 'remote-car'; const mdl = model.clone(true); g.add(mdl);
+    const pm = paintMat.clone(), lms = new Map();
+    mdl.traverse(o => {
+      if (!o.isMesh) return;
+      const swap = m => { if (m === paintMat) return pm; if (lightMats.includes(m)) { let c = lms.get(m); if (!c) lms.set(m, c = m.clone()); return c; } return m; };
+      o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+    });
+    const rg = {}, spin = { FL: 0, FR: 0, RL: 0, RR: 0 }; for (const k of ['FL', 'FR', 'RL', 'RR']) rg[k] = { steer: mdl.getObjectByName('steer_' + k), spin: mdl.getObjectByName('spin_' + k) };
+    scene.add(g);
+    const api = {
+      root: g,
+      setPaint(i) { const [, c, m] = PAINTS[((i % PAINTS.length) + PAINTS.length) % PAINTS.length]; pm.color.setHex(c).convertSRGBToLinear(); pm.metalness = m; },
+      /** st: { steer, wf, wr (wheel rad/s), brake } */
+      update(dt, st) {
+        for (const k of ['FL', 'FR', 'RL', 'RR']) { const r = rg[k]; if (!r.spin) continue; spin[k] = (spin[k] + (k[0] === 'F' ? st.wf : st.wr) * dt) % (Math.PI * 2); r.spin.rotation.x = spin[k]; if (k[0] === 'F' && r.steer) r.steer.rotation.y = st.steer; }
+        const night = tod.night; for (const m of lms.values()) m.emissiveIntensity = 1.0 * (0.25 + 0.75 * night) + (st.brake ? 1.5 : 0);
+      },
+      dispose() { scene.remove(g); pm.dispose(); for (const m of lms.values()) m.dispose(); },
+    };
+    api.setPaint(pi); return api;
+  }
+  drive.car = {
+    vehicle, ground, hud, makeRemote, paint: () => paintIdx, paintHex: PAINTS.map(p => p[1]), lights: () => lightsOn,
+    teleport: (x, z, heading) => respawn({ x, z, y: null, heading }),
+    /** local car net state: [x,y,z, qx,qy,qz,qw, vx,vy,vz, steer, wheelF, wheelR, brake] */
+    netState: () => { const p = vehicle.pos, q = vehicle.quat, v = vehicle.vel; return [p.x, p.y, p.z, q.x, q.y, q.z, q.w, v.x, v.y, v.z, (vehicle.wheels[0].steer + vehicle.wheels[1].steer) / 2, wheelAvg(true), wheelAvg(false), vehicle.input.brake > 0.1 ? 1 : 0]; },
+  };       // public API for the map / navigator (src/nav.js)
   window.__car = { vehicle, world, ground, colliders, respawn, applyPaint, audio, cam, hud, RAPIER, root, rig, skids, smoke, sparks, input };
   return { update };
 }

@@ -19,6 +19,8 @@ const LANDMARK_IDS = {
   // Opera House (Freedom Square, end of Northern Avenue) and Saint Gregory the Illuminator Cathedral
   opera: [1267677, 412870637],
   cathedral: [31622320],
+  // Orbeli Brothers St: the 104 m strip block at no. 6 (OSM says 10 storeys; really brick blocks + the glass BISA building, modelled in src/orbeli.js)
+  bisa: [82662788],
 };
 
 const area = r => { let s = 0; for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; };
