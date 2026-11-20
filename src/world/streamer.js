@@ -3,6 +3,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { TileBatches } from './batches.js';
+
+// meshopt decoding off the main thread (tile parsing used to cost several ms of main-thread time per tile)
+try { MeshoptDecoder.useWorkers?.(Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2))); } catch { /* single-threaded fallback */ }
+const BATCH = new URLSearchParams(location.search).get('batch') !== '0';     // ?batch=0: one Mesh per tile material (old path, for A/B)
 
 const K = 1.05;                // a node of size S is refined into children when the camera is closer than S*K*lodScale
 const key = (L, i, j) => `${L}_${i}_${j}`;
@@ -22,6 +27,7 @@ export class Streamer {
     }
     this.queue = []; this.active = 0; this.maxActive = 3; this.pending = []; this.frame = 0; this.stat = { loaded: 0, shown: 0, tris: 0 };
     this.lastPos = new THREE.Vector3(1e9, 0, 1e9); this.desired = new Set(); this.base = import.meta.env?.BASE_URL ?? '/';
+    this.batches = BATCH ? new TileBatches(scene) : null;
   }
   dist(n, p) { const dx = Math.max(n.x0 - p.x, 0, p.x - (n.x0 + n.S)), dz = Math.max(n.z0 - p.z, 0, p.z - (n.z0 + n.S)); return Math.hypot(dx, dz, Math.max(0, Math.abs(p.y - (n.minY + n.maxY) / 2) - (n.maxY - n.minY) / 2) * 0.5); }
   loaded(n) { return n.state === 'loaded'; }
@@ -61,7 +67,7 @@ export class Streamer {
     // dedupe: a shown node must not overlap a shown ancestor
     for (const n of [...show]) for (let a = n.parent; a; a = a.parent) if (show.has(a)) { show.delete(n); break; }
     let tris = 0;
-    for (const n of this.nodes.values()) { const v = show.has(n); if (n.group && n.shown !== v) n.group.visible = v; n.shown = v && !!n.group; if (v) { n.last = performance.now(); tris += n.tris ?? 0; } }
+    for (const n of this.nodes.values()) { const v = show.has(n); if (n.group && n.shown !== v) this.setShown(n, v); n.shown = v && !!n.group; if (v) { n.last = performance.now(); tris += n.tris ?? 0; } }
     this.stat.shown = show.size; this.stat.tris = tris;
     // load queue: wanted nodes nearest-first, then their coarser ancestors as cover
     const need = new Set(want); for (const n of want) for (let a = n.parent, k = 0; a && k < 6; a = a.parent, k++) need.add(a);
@@ -81,22 +87,41 @@ export class Streamer {
   flushPending() {
     const item = this.pending.shift(); if (!item) return; const [n, g] = item;
     const grp = new THREE.Group(); grp.name = `tile_${n.L}_${n.i}_${n.j}`; let tris = 0;
+    const meshes = []; g.scene.updateMatrixWorld(true);
     g.scene.traverse(o => {
       if (!o.isMesh) return;
       const mname = o.material.name, m = this.M[mname]; if (m) { o.material.dispose(); o.material = m; } else console.warn('no material', mname);
       o.matrixAutoUpdate = false; o.updateMatrix(); tris += (o.geometry.index?.count ?? 0) / 3;
-      this.onMesh?.(o, mname, n.L);
+      this.onMesh?.(o, mname, n.L); meshes.push(o);
     });
+    n.batch = null;
+    if (this.batches) {
+      // geometry is copied into the shared per-material batches; only L0 roofs stay as (never rendered) meshes for plug-ins that raycast them
+      n.batch = [];
+      for (const o of meshes) {
+        if (!o.visible) { o.geometry.dispose(); continue; }
+        try { n.batch.push(this.batches.add(o.material, o.geometry, o.matrixWorld, { castShadow: o.castShadow, receiveShadow: o.receiveShadow, renderOrder: o.renderOrder })); }
+        catch (e) { console.warn('batch failed, keeping mesh', o.material.name, e.message); o.userData.keep = true; continue; }
+        if (!(n.L === 0 && o.material === this.M.roof)) { o.removeFromParent(); o.geometry.dispose(); }
+      }
+      for (const o of meshes) if (o.parent && !o.userData.keep) o.visible = false;     // roof proxies: in the scene graph, never drawn
+    }
     while (g.scene.children.length) grp.add(g.scene.children[0]);
+    grp.updateMatrixWorld(true); grp.updateMatrixWorld = () => {};        // static tile: skip the per-frame scene-graph walk over its children
     grp.visible = false; n.group = grp; n.tris = tris; n.state = 'loaded'; n.last = performance.now(); this.scene.add(grp);
     this.lastPos.set(1e9, 0, 1e9);   // re-evaluate next frame so the new tile can be shown immediately
     this.stat.loaded++;
+  }
+  setShown(n, v) {
+    if (n.batch) { for (const h of n.batch) this.batches.setVisible(h, v); n.group.visible = v && n.group.children.some(o => o.userData.keep); }
+    else n.group.visible = v;
   }
   evict(pos) {
     const cap = this.quality.level === 'low' ? 110 : this.quality.level === 'med' ? 180 : this.quality.level === 'ultra' ? 360 : 280, loaded = [...this.nodes.values()].filter(n => n.state === 'loaded');
     if (loaded.length <= cap) return;
     const now = performance.now();
     loaded.filter(n => !this.desired.has(n) && !n.shown && now - n.last > 4000).sort((a, b) => a.last - b.last).slice(0, loaded.length - cap).forEach(n => {
+      if (n.batch) { for (const h of n.batch) this.batches.release(h); n.batch = null; }
       n.group.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); this.scene.remove(n.group); n.group = null; n.state = 'idle'; n.shown = false; this.stat.loaded--;
     });
   }

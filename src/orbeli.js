@@ -4,6 +4,10 @@
 //   * concrete utility poles with overhead wires along the street
 // Data: public/map/orbeli.json (tools/build-orbeli.mjs). The generic OSM box is suppressed via data/landmark-skip.json (tools/build-landmarks.mjs, id 82662788).
 // Contract: default export async ctx => ({ update(dt, camera, time) })
+import { buildStreetBlocks } from './streets/facade.js';
+import { buildStreetscape } from './streets/streetscape.js';
+import { shared as matShared } from './materials.js';
+import { quality } from './quality.js';
 const FLOOR_B = 3.1, FLOOR_G = 3.7, BAY_B = 3.3, BAY_G = 4;
 const hash = (a, b = 0) => { let x = Math.imul((a * 374761393 + b * 668265263) | 0, 1274126177); x = Math.imul(x ^ (x >>> 13), 1103515245); return ((x ^ (x >>> 16)) >>> 0) / 4294967296; };
 
@@ -67,7 +71,7 @@ export default async function (ctx) {
 
   // ------------------------------------------------------------------ building volumes
   const cornerH = (s0, s1, d0, d1) => { let lo = 1e9, hi = -1e9; for (const s of [s0, s1]) for (const d of [d0, d1]) { const p = P(s, d), y = H(p[0], p[1]); lo = Math.min(lo, y); hi = Math.max(hi, y); } return [lo, hi]; };
-  const sovietA = sovietFacade({ base: '#a65a40', frame: '#e7e1d3', seed: 11, brick: true }), sovietB = sovietFacade({ base: '#b46a4a', frame: '#e7e1d3', seed: 23, brick: true }), glassT = glassFacade(), plainT = plain('#cfc9bd', 5);
+  const sovietA = sovietFacade({ base: '#a65a40', frame: '#e7e1d3', seed: 11, brick: true }), sovietB = sovietFacade({ base: '#b46a4a', frame: '#e7e1d3', seed: 23, brick: true }), glassT = glassFacade(), plainT = plain('#8f8b72', 5);                  // BISA flanks: olive-grey concrete
   const stone = flat(0x56504a, 0.95), roofM = flat(0x2c2d31, 0.95), corniceM = flat(0xc9bfae, 0.9), steel = flat(0x3a3f44, 0.6, 0.6);
   function volume({ s0, s1, d0, d1, floors, floorH, front, side, back, name, cornice = true }) {
     const [lo, hi] = cornerH(s0, s1, d0, d1), w = s1 - s0, dp = d1 - d0, y0 = hi + 0.45, h = floors * floorH;
@@ -82,13 +86,27 @@ export default async function (ctx) {
   const brickFront = (t, floorH) => (w, h) => mat(t, [w / (BAY_B * 4), h / (floorH * 2)]);
   const brickSide = t => dp => mat(t, [dp / (BAY_B * 4), 3]);
   const SB = 42.5, SE = 58.5, SETBACK = 3.5;                    // BISA occupies s = 42.5 .. 58.5, set back 3.5 m behind the fence line
-  // left block (west), 6 floors; right block (east), 6 floors
-  volume({ s0: 0, s1: SB, d0: 0, d1: depth, floors: 6, floorH: FLOOR_B, name: 'orbeli-west', front: brickFront(sovietA, FLOOR_B), back: brickFront(sovietA, FLOOR_B), side: brickSide(sovietA) });
-  volume({ s0: SE, s1: len, d0: 0, d1: depth, floors: 6, floorH: FLOOR_B, name: 'orbeli-east', front: brickFront(sovietB, FLOOR_B), back: brickFront(sovietB, FLOOR_B), side: brickSide(sovietB) });
-  // BISA: 5 floors of curtain wall, flat roof with a small plant room
+  // neighbours of BISA (west = 6-floor red-tuff block, east = old orange-tuff 4-floor house, then a pink-tuff block) + every block along
+  // Orbeli Brothers St and Komitas Ave: procedural facades (src/streets/facade.js), a handful of draw calls for all of them
+  const rect = (s0, s1, id, lv, pal, gf = 'res') => {                                          // strip rectangle -> CCW ring + road-facing flags (the d = 0 edge)
+    let ring = [P(s0, 0), P(s1, 0), P(s1, depth), P(s0, depth)]; const A = ring.reduce((s, p, i) => { const q = ring[(i + 1) % 4]; return s + p[0] * q[1] - q[0] * p[1]; }, 0); if (A < 0) ring.reverse();
+    const front = ring.map((p, i) => { const q = ring[(i + 1) % 4], m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; return Math.abs((m[0] - B[0]) * n[0] + (m[1] - B[1]) * n[1]) < 0.5 ? 1 : 0; });
+    return { id, lv, ring, front, street: 'o', style: 'stalin', pal, roof: 'flat', gf };
+  };
+  const SO = SE + 24;
+  const uNight = { value: 1 };
+  const streetBlocks = buildStreetBlocks({ H, root, quality, shared: { uNight, uDay: matShared.uDay },
+    blocks: [rect(0, SB, 9001, 6, [160, 98, 82], 'mixed'), rect(SE, SO, 9002, 4, [196, 112, 70]), rect(SO, len, 9003, 6, [176, 128, 112]), ...(data.blocks ?? [])] });
+  const stats = streetBlocks.stats;
+  const scape = buildStreetscape({ data, H, root, M: ctx.M });
   const bisa = volume({ s0: SB, s1: SE, d0: SETBACK, d1: depth, floors: 5, floorH: FLOOR_G, name: 'bisa', cornice: false,
     front: () => mat(glassT, [1, 1], { rough: 0.25, metal: 0.35, env: 1.4, glow: 1.0 }), back: () => mat(plainT, [4, 3]), side: dp => mat(plainT, [dp / 13.2, 5 * FLOOR_G / 6.2]) });
   { const pr = new THREE.Mesh(new THREE.BoxGeometry(7, 2.4, 6), steel); const c = P((SB + SE) / 2, depth * 0.55); pr.position.set(c[0], bisa.y0 + bisa.h + 1.2, c[1]); pr.rotation.y = theta; root.add(pr); }
+  // curved glass bay at the west corner of the front (half-cylinder bulging into the setback, as on the real tower), flat roof slab on top
+  { const R = 3.0, arc = Math.PI * R, h = 5 * FLOOR_G, [, hi] = cornerH(SB, SB + 2 * R, SETBACK - R, SETBACK + 1), c = P(SB + R + 0.2, SETBACK + 0.2);
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(R, R, h, 24, 1, false, -Math.PI / 2, Math.PI), mat(glassT, [arc / 16, 1], { rough: 0.2, metal: 0.4, env: 1.5, glow: 1.0 }));
+    cyl.position.set(c[0], hi + 0.45 + h / 2, c[1]); cyl.rotation.y = theta; cyl.castShadow = true; root.add(cyl);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.15, R + 0.15, 0.4, 24, 1, false, -Math.PI / 2, Math.PI), flat(0x2c2d31, 0.9)); cap.position.set(c[0], hi + 0.45 + h + 0.2, c[1]); cap.rotation.y = theta; root.add(cap); }
   // entrance canopy
   { const cn = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.25, 2.6), steel); const c = P((SB + SE) / 2, SETBACK - 1.1), [, hi] = cornerH(SB, SE, SETBACK, SETBACK + 1); cn.position.set(c[0], hi + 0.45 + 3.7, c[1]); cn.rotation.y = theta; root.add(cn); }
 
@@ -117,7 +135,7 @@ export default async function (ctx) {
 
   // ------------------------------------------------------------------ poles + overhead wires
   const poleSpots = [];
-  for (const rd of data.roads) {
+  for (const rd of data.orbeli ?? data.roads) {                                          // concrete utility poles + cable spaghetti: Orbeli only (Komitas has none)
     let acc = 0, side = 1;
     for (let i = 2; i < rd.length; i += 2) {
       const ax = rd[i - 2], az = rd[i - 1], bx = rd[i], bz = rd[i + 1], L = Math.hypot(bx - ax, bz - az); if (L < 0.5) continue; const ux = (bx - ax) / L, uz = (bz - az) / L;
@@ -149,11 +167,12 @@ export default async function (ctx) {
     const wires = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x1a1a1c, transparent: true, opacity: 0.85 })); wires.frustumCulled = false; root.add(wires);
   }
 
-  console.log(`[orbeli] ${root.children.length} objects, ${poleSpots.length} poles`);
+  console.log(`[orbeli/komitas] ${(data.blocks ?? []).length + 3} blocks, ${stats.windows} window cells, ${stats.draws} draw calls in ${stats.cells} cells, ${Math.round(stats.tris / 1000)}k tris, ${stats.balconies} balconies, ${poleSpots.length} poles`, scape.stats);
   window.__orbeli = { root, data };
   return {
     update(dt, camera, time) {
       const n = tod?.night ?? 1; for (const e of emis) e.m.emissiveIntensity = e.k * n;
+      uNight.value = n; streetBlocks.update(camera.position, n);
     },
   };
 }

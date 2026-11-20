@@ -84,7 +84,7 @@ export class LodGroup {
     for (let i = 0; i < n; i++) { this.px[i] = matrices[i * 16 + 12]; this.pz[i] = matrices[i * 16 + 14]; }
     this.maxDist = levels[levels.length - 1].dist; this.last = new THREE.Vector3(1e9, 0, 0); this.lvl = new Int8Array(n);
     this.counts = levels.map(() => 0);
-    for (const lv of levels) for (const mesh of lv.meshes) { mesh.frustumCulled = false; mesh.count = 0; }
+    for (const lv of levels) for (const mesh of lv.meshes) { mesh.frustumCulled = false; mesh.count = 0; mesh.visible = false; }
   }
   update(cam, force = false) {
     if (!force && this.last.distanceToSquared(cam) < 9) return;
@@ -102,7 +102,7 @@ export class LodGroup {
         const ic = this.itemColors.get(mesh); if (ic) { const ca = mesh.instanceColor.array; ca[k * 3] = ic[i * 3]; ca[k * 3 + 1] = ic[i * 3 + 1]; ca[k * 3 + 2] = ic[i * 3 + 2]; }
       }
     }
-    for (let l = 0; l < nl; l++) for (const mesh of levels[l].meshes) { mesh.count = cnt[l]; mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; for (const e of this.extras) if (e.mesh === mesh) e.attr.needsUpdate = true; }
+    for (let l = 0; l < nl; l++) for (const mesh of levels[l].meshes) { mesh.count = cnt[l]; mesh.visible = cnt[l] > 0; mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; for (const e of this.extras) if (e.mesh === mesh) e.attr.needsUpdate = true; }
     this.counts = cnt;
   }
 }
@@ -174,7 +174,7 @@ export class CellFamily {
     const R = radius;
     this.cells = [...map.values()].map(c => { const cx = (c.x0 + c.x1) / 2, cz = (c.z0 + c.z1) / 2, cy = (c.y0 + c.y1) / 2 + mid; return { items: Int32Array.from(c.items), cx, cy, cz, r: Math.hypot((c.x1 - c.x0) / 2, (c.z1 - c.z0) / 2, (c.y1 - c.y0) / 2 + mid) + R }; });
     this.counts = levels.map(() => 0); this.lastPos = new THREE.Vector3(1e9, 0, 0); this.lastDir = new THREE.Vector3(0, 0, 1); this.kept = this.cells.reduce((s, c) => s + c.items.length, 0);
-    for (const lv of levels) for (const mesh of lv.meshes) { mesh.frustumCulled = false; mesh.count = 0; }
+    for (const lv of levels) for (const mesh of lv.meshes) { mesh.frustumCulled = false; mesh.count = 0; mesh.visible = false; }
   }
   /** returns true when the buffers were rewritten */
   update(force = false) {
@@ -202,7 +202,7 @@ export class CellFamily {
       }
     }
     for (let l = 0; l < nl; l++) for (const e of cap[l]) {
-      const k = cnt[l], mesh = e.mesh; mesh.count = k;
+      const k = cnt[l], mesh = e.mesh; mesh.count = k; mesh.visible = k > 0;     // empty LOD levels cost a full program/uniform setup + an empty draw in every pass
       const up = a => { a.clearUpdateRanges(); if (k > 0) a.addUpdateRange(0, k * a.itemSize); a.needsUpdate = true; };
       up(mesh.instanceMatrix); if (e.ca) up(mesh.instanceColor); for (const x2 of e.ex) up(x2.attr);
     }

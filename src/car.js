@@ -73,7 +73,7 @@ export default async function car(ctx) {
     uiOpen: () => !!drive.uiLock,
     key(code) {
       audio.resume();
-      if (code === 'Tab') { drive.set(!drive.active); return; }
+      if (code === 'Tab') { if (drive.toggleRole) drive.toggleRole(); else drive.set(!drive.active); return; }
       if (!drive.active) return;
       switch (code) {
         case 'KeyC': cam.cycle(); hud.toast(CAM_NAMES[cam.mode], 0.8); break;
@@ -224,7 +224,7 @@ export default async function car(ctx) {
   }
   drive.pad = input.pad;       // gamepad state for the map (stick pans, triggers zoom)
   drive.car = {
-    vehicle, ground, hud, makeRemote, paint: () => paintIdx, paintHex: PAINTS.map(p => p[1]), lights: () => lightsOn,
+    vehicle, ground, hud, makeRemote, paint: () => paintIdx, setPaint: applyPaint, paints: PAINTS.map(([name, hex]) => ({ name, hex })), setVisible: v => { root.visible = v; }, setLights: v => { lightsOn = v; }, audio, paintHex: PAINTS.map(p => p[1]), lights: () => lightsOn,
     teleport: (x, z, heading) => respawn({ x, z, y: null, heading }),
     /** local car net state: [x,y,z, qx,qy,qz,qw, vx,vy,vz, steer, wheelF, wheelR, brake] */
     netState: () => { const p = vehicle.pos, q = vehicle.quat, v = vehicle.vel; return [p.x, p.y, p.z, q.x, q.y, q.z, q.w, v.x, v.y, v.z, (vehicle.wheels[0].steer + vehicle.wheels[1].steer) / 2, wheelAvg(true), wheelAvg(false), vehicle.input.brake > 0.1 ? 1 : 0]; },

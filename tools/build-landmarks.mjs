@@ -64,6 +64,7 @@ for (const id of wanted) if (!lm[id]) console.warn('landmark id not found in osm
 fs.mkdirSync('public/map/lm', { recursive: true });
 fs.writeFileSync('public/map/lm/footprints.json', JSON.stringify({ groups: LANDMARK_IDS, lm, others }));
 const CIRCLES = []; // [x,z,r] areas where every generic building is suppressed (e.g. around a landmark that has no usable OSM outline)
-const skip = { ids: [...wanted], circles: CIRCLES };
+const orbeliSkip = fs.existsSync('data/orbeli-skip.json') ? JSON.parse(fs.readFileSync('data/orbeli-skip.json', 'utf8')).ids : [];   // written by tools/build-orbeli.mjs (run it first)
+const skip = { ids: [...new Set([...wanted, ...orbeliSkip])], circles: CIRCLES };
 fs.writeFileSync('data/landmark-skip.json', JSON.stringify(skip));
 console.log('landmarks:', Object.keys(lm).length, 'neighbour outlines:', others.length, 'skip ids:', skip.ids.length);

@@ -103,7 +103,7 @@ export default async function ({ THREE, camera, drive }) {
   const $ = id => root.querySelector('#' + id);
 
   // ------------------------------------------------------------------ settings (only values the user touched are stored, so the defaults stay whatever the game ships with)
-  const SET = { bloom: LS.get('yd.bloom'), tod: LS.get('yd.tod'), wet: LS.get('yd.wet'), sound: LS.get('yd.sound'), q: LS.get('yd.q') };
+  const SET = { bloom: LS.get('yd.bloom'), tod: LS.get('yd.tod'), wet: LS.get('yd.wet'), sound: LS.get('yd.sound'), q: LS.get('yd.q'), tex: LS.get('yd.tex'), fps: LS.get('yd.fps') };
   const Y = () => window.__yerevan;
   function applySettings() {
     const y = Y(); if (!y) return;
@@ -111,6 +111,7 @@ export default async function ({ THREE, camera, drive }) {
     if (SET.tod !== null) y.setTod(+SET.tod);
     if (SET.wet !== null) y.wetness.value = +SET.wet;
     if (SET.sound !== null) drive.car?.audio?.mute(SET.sound === '0');
+    y.showFps?.(SET.fps !== '0');
   }
   function setSetting(k, v) { SET[k] = String(v); LS.set('yd.' + k, String(v)); applySettings(); }
 
@@ -247,11 +248,15 @@ export default async function ({ THREE, camera, drive }) {
     $('set-rows').innerHTML = `
       <div class="row"><label>Nickname<small>Shown above your car</small></label><input id="st-nick" maxlength="16" value="${esc(nickname)}" spellcheck="false" autocomplete="off"></div>
       <div class="row"><label>Graphics<small>Reloads the game · now: ${esc(quality())}</small></label>${seg('st-q', [['auto', 'Auto'], ['low', 'Low'], ['med', 'Med'], ['high', 'High'], ['ultra', 'Ultra']], qNow)}</div>
+      <div class="row"><label>Textures<small>Reloads the game · independent of Graphics</small></label>${seg('st-tex', [['auto', 'Auto'], [512, '512'], [1024, '1K'], [2048, '2K']], SET.tex ?? 'auto')}</div>
+      <div class="row"><label>FPS counter</label>${seg('st-fps', [[1, 'On'], [0, 'Off']], SET.fps ?? 1)}</div>
       <div class="row"><label>Bloom</label>${seg('st-bloom', [[1, 'On'], [0, 'Off']], SET.bloom ?? (Y()?.bloom.enabled ? 1 : 0))}</div>
       <div class="row"><label>Time of day</label>${seg('st-tod', [[0, 'Night'], [0.5, 'Dusk'], [1, 'Day']], SET.tod ?? 0)}</div>
       <div class="row"><label>Wet roads</label>${seg('st-wet', [[1, 'Wet'], [0, 'Dry']], SET.wet ?? (Y()?.wetness.value > 0.5 ? 1 : 0))}</div>
       <div class="row"><label>Sound</label>${seg('st-sound', [[1, 'On'], [0, 'Off']], SET.sound ?? 1)}</div>`;
     const bind = (id, fn) => [...$(id).children].forEach(n => n.onclick = () => { fn(n.dataset.v); renderSettings(); });
+    bind('st-fps', v => setSetting('fps', v));
+    bind('st-tex', v => { if (v === 'auto') { try { localStorage.removeItem('yd.tex'); } catch { /* */ } } else LS.set('yd.tex', v); const u = new URL(location.href); u.searchParams.delete('tex'); location.href = u.toString(); });
     bind('st-bloom', v => setSetting('bloom', v)); bind('st-tod', v => setSetting('tod', v)); bind('st-wet', v => setSetting('wet', v)); bind('st-sound', v => setSetting('sound', v));
     bind('st-q', v => { if (v === 'auto') { try { localStorage.removeItem('yd.q'); } catch { /* */ } } else LS.set('yd.q', v); const u = new URL(location.href); u.searchParams.delete('q'); location.href = u.toString(); });
     const inp = $('st-nick'); const commit = () => { const n = inp.value.trim(); if (nameOk(n)) { nickname = n; drive.mp?.setName(n); } else inp.value = nickname; };

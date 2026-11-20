@@ -25,7 +25,7 @@ function patch(mat, shared, fragBody, kind) {
     sh.uniforms.uMid = farShared.uMid; sh.uniforms.uFar = farShared.uFar; sh.uniforms.uLights = farShared.uLights;
     sh.uniforms.uNear = shared.uAerial; sh.uniforms.uDay = shared.uDay; sh.uniforms.uGain = { value: 0.8 };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n${HEAD}`)
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normal; vFUv = uv;');
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_BATCHING\nvWP = (modelMatrix * batchingMatrix * vec4(transformed, 1.0)).xyz;\n#else\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif\nvWN = normal; vFUv = uv;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${HEAD}\n${UNI}\n${GLSL}`)
       .replace('#include <map_fragment>', `#include <map_fragment>\n vec3 farGlow = vec3(0.0); float night = 1.0 - uDay;\n${fragBody}`)
       .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\n gl_FragColor.rgb += farGlow * mix(1.0, 0.55, fogFactor);\n#else\n gl_FragColor.rgb += farGlow;\n#endif');

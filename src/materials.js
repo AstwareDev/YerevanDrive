@@ -43,6 +43,14 @@ vec2 pbrDir(vec2 cs) {  // road direction from (cos2a, sin2a)
 `;
 
 const f1 = (v) => (+v).toFixed(3);
+// world position / normal varyings; streamed tiles are drawn through THREE.BatchedMesh (src/world/batches.js), whose per-instance matrix must be applied too
+export const WORLD_VARYINGS = `
+#ifdef USE_BATCHING
+  vWP = (modelMatrix * batchingMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * mat3(batchingMatrix) * normal);
+#else
+  vWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * normal);
+#endif
+  vPUv = uv;`;
 
 // ground-ish surfaces: asphalt, sidewalk, plaza, terrain, grass, dirt, roof ------------------------------------------
 function groundFrag(kind, c) {
@@ -280,7 +288,7 @@ function surface(mat, kind, puddle, c = {}) {
     if (sMh) Object.assign(sh.uniforms, { uMhA: sMh.albedo, uMhN: sMh.normal, uMhOn: sMh.on });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWP; varying vec2 vPUv; varying vec3 vWN;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vPUv = uv; vWN = normalize(mat3(modelMatrix) * normal);');
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + WORLD_VARYINGS);
     let fs = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + COMMON);
     fs = fs.replace('#include <map_fragment>', gen.map).replace('#include <roughnessmap_fragment>', gen.rough).replace('#include <normal_fragment_maps>', gen.normal);
     if (gen.metal) fs = fs.replace('#include <metalnessmap_fragment>', gen.metal);

@@ -38,6 +38,7 @@ export default async function ({ THREE, drive }) {
   // ------------------------------------------------------------------ transport
   let seq = 0, tr = null, bc = null;
   function handle(m) {
+    if (m && m.bye && m.i !== myId) { const g = players.get(m.i); if (g) dropPlayer(g); return; }
     if (!m || m.i === myId || !Array.isArray(m.a)) return;
     const now = performance.now(); let p = players.get(m.i);
     if (!p) { if (players.size >= MAX_REMOTE) return; p = { id: m.i, name: 'Driver', paint: 0, snaps: [], car: null, tag: null, seen: now, x: 0, z: 0, heading: 0, lastSeq: -1 }; players.set(m.i, p); linked = true; }
@@ -76,7 +77,8 @@ export default async function ({ THREE, drive }) {
   }
   panel.addEventListener('click', e => { if (!e.target.closest('.me')) return; const n = prompt('Your driver name', myName); if (n && n.trim()) { myName = n.trim().slice(0, 16); localStorage.setItem('mp.name', myName); renderPanel(); } });
 
-  const sendState = () => { const dc = drive.car; if (!dc) return; const a = dc.netState().map((v, k) => k >= 3 && k <= 6 ? r4(v) : r2(v)); send({ i: myId, s: ++seq, a, n: myName, p: dc.paint() }); };
+  let spectating = false;
+  const sendState = () => { const dc = drive.car; if (!dc || spectating) return; const a = dc.netState().map((v, k) => k >= 3 && k <= 6 ? r4(v) : r2(v)); send({ i: myId, s: ++seq, a, n: myName, p: dc.paint() }); };
   // a hidden tab stops rendering (and driving) but keeps its parked car visible to the others
   let lastFrame = performance.now();
   setInterval(() => { if (performance.now() - lastFrame > 1200) sendState(); }, 1000);
@@ -107,11 +109,16 @@ export default async function ({ THREE, drive }) {
         tag.style.display = 'block'; tag.style.left = ((v3.x * 0.5 + 0.5) * innerWidth).toFixed(0) + 'px'; tag.style.top = ((-v3.y * 0.5 + 0.5) * innerHeight).toFixed(0) + 'px';
         const html = `${esc(p.name)}<small>${fmt(dist)}</small>`; if (tag.dataset.h !== html) { tag.dataset.h = html; tag.innerHTML = html; }
       } else tag.style.display = 'none';
-      list.push({ id: p.id, name: p.name, x, z, heading: p.heading, color: col(dc.paintHex[p.paint] ?? 0x888888) });
+      list.push({ id: p.id, name: p.name, x, y, z, heading: p.heading, color: col(dc.paintHex[p.paint] ?? 0x888888) });
     }
     drive.players = list;
     panelT -= dt; if (panelT <= 0) { panelT = 0.5; renderPanel(); }
   }
+  drive.mp = {
+    get name() { return myName; }, get count() { return players.size; },
+    setName(n) { myName = String(n).trim().slice(0, 16) || myName; localStorage.setItem('mp.name', myName); renderPanel(); },
+    setSpectating(v) { spectating = v; if (v) send({ i: myId, s: ++seq, bye: 1 }); else sendState(); },
+  };
   window.__mp = { players, myId, get name() { return myName; }, send, handle };
   renderPanel();
   return { update };

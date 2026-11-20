@@ -1,23 +1,24 @@
 // Automatic quality governor: keeps ~60 fps on unknown hardware (GTX 1660 Super, laptops). Steps down when the smoothed frame time is
 // too high, steps back up slowly when there is headroom. Disable with ?gov=0 (the in-app screenshot environment runs on a software GPU).
-export function createGovernor({ renderer, composer, quality, bloom, ssrPass, moon, basePixelRatio }) {
+export function createGovernor({ renderer, composer, quality, bloom, fxPass, moon, basePixelRatio }) {
   const enabled = new URLSearchParams(location.search).get('gov') !== '0';
   const baseLod = quality.lodScale;
   // each step is cumulative; step 0 = full quality for the chosen preset
   const steps = [
     () => {},
     () => setPR(0.85),
+    () => { if (fxPass) fxPass.degrade = Math.max(fxPass.degrade, 1); },          // ray tracing off (screen-space reflections stay)
     () => { setPR(0.72); quality.lodScale = baseLod * 0.85; },
-    () => { if (ssrPass) ssrPass.enabled = false; },
+    () => { if (fxPass) fxPass.degrade = Math.max(fxPass.degrade, 2); },          // ambient occlusion off
     () => { moon.castShadow = false; },
-    () => { setPR(0.6); quality.lodScale = baseLod * 0.7; bloom.enabled = false; },
+    () => { setPR(0.6); quality.lodScale = baseLod * 0.7; bloom.enabled = false; if (fxPass) fxPass.degrade = 3; },
   ];
   let level = 0, ema = 16.7, slow = 0, fast = 0, t = 0;
   function setPR(k) { renderer.setPixelRatio(basePixelRatio * k); composer.setPixelRatio(basePixelRatio * k); composer.setSize(innerWidth, innerHeight); }
   function apply(l) {
     // reset to full, then apply cumulative steps up to l
     renderer.setPixelRatio(basePixelRatio); composer.setPixelRatio(basePixelRatio); quality.lodScale = baseLod;
-    if (ssrPass) ssrPass.enabled = quality.reflections; moon.castShadow = quality.shadows; bloom.enabled = quality.bloom;
+    if (fxPass) fxPass.degrade = 0; moon.castShadow = quality.shadows; bloom.enabled = quality.bloom;
     for (let i = 1; i <= l; i++) steps[i]();
     composer.setSize(innerWidth, innerHeight); level = l;
   }

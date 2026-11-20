@@ -1,7 +1,9 @@
-// Vegetation: 6 species x shape variants, 3 distance levels per tree (full leaf-card crown / sparse big cards / crossed-quad impostor),
-// wind sway, shrubs / hedges, flower beds. Everything is instanced and culled per 128 m cell (CellFamily).
-// One material draws leaves AND wood (the leaf textures carry an opaque bark swatch in their bottom-left corner).
+// Vegetation: every tree is the tree_animate.glb model (3 birch-like variants x near / mid LOD, one atlas material, see tools/build-tree.mjs)
+// plus a crossed-quad far impostor; shrubs / hedges and flower beds are procedural. Everything is instanced and culled per 128 m cell (CellFamily).
+// Wind: vertex-shader sway (onBeforeCompile) driven by one time uniform; the model's morph-target animation is not used.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { GeoBuilder, CellFamily, instanced, composeInto, mkRng, lin, mul, mix, clamp, canvas, canvasTex, track } from './util.js';
 import { leafTexture, flowerTexture } from './textures.js';
 import { quality } from '../quality.js';
@@ -12,7 +14,7 @@ const uWarm = { value: new THREE.Vector3(0.085, 0.052, 0.02) };
 // ------------------------------------------------------------------ materials
 // NaN guard: the stock chunk normalises vNormal; a zero-length interpolated normal would give NaN -> bloom smears it over the frame.
 const NOFLIP = THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '').replace('normalize( vNormal )', 'normalize( vNormal + vec3( 0.0, 1.0e-4, 0.0 ) )');
-function patchFoliage(mat, { flutter = 1, warm = 1, sway = true } = {}) {
+function patchFoliage(mat, { flutter = 1, warm = 1, sway = true, swayK = 0.00085 } = {}) {
   mat.onBeforeCompile = sh => {
     sh.uniforms.uTime = uTime; sh.uniforms.uWarm = uWarm; sh.uniforms.uFlutter = { value: flutter }; sh.uniforms.uWarmK = { value: warm };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; uniform float uFlutter;')
@@ -20,7 +22,7 @@ function patchFoliage(mat, { flutter = 1, warm = 1, sway = true } = {}) {
         ${sway ? `{
           vec3 ip = vec3(instanceMatrix[3][0], 0.0, instanceMatrix[3][2]);
           float hgt = max(transformed.y, 0.0);
-          float w = hgt * hgt * 0.00085;
+          float w = hgt * hgt * ${swayK.toFixed(5)};
           float ph = ip.x * 0.31 + ip.z * 0.27;
           float gust = 0.6 + 0.4 * sin(uTime * 0.37 + ip.x * 0.011 + ip.z * 0.008);
           transformed.x += (sin(uTime * 1.25 + ph) + 0.4 * sin(uTime * 2.9 + ph * 1.7)) * w * gust;
@@ -31,12 +33,12 @@ function patchFoliage(mat, { flutter = 1, warm = 1, sway = true } = {}) {
       .replace('#include <normal_fragment_begin>', NOFLIP)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * uWarm * uWarmK;');
   };
-  mat.customProgramCacheKey = () => 'foliage' + flutter + '_' + warm + '_' + sway;
+  mat.customProgramCacheKey = () => 'foliage' + flutter + '_' + warm + '_' + sway + '_' + swayK;
   return mat;
 }
 function makeMats() {
   const leaf = (tex, extra = {}) => patchFoliage(new THREE.MeshStandardMaterial({ map: tex, vertexColors: true, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.4, alphaToCoverage: true, ...extra }));
-  return { leaf: [leaf(leafTexture('lobed', 3, [92, 114])), leaf(leafTexture('heart', 8, [96, 126])), leaf(leafTexture('oval', 12, [84, 110])), leaf(leafTexture('oval', 17, [100, 128])), leaf(leafTexture('conifer', 23, [138, 162])), leaf(leafTexture('conifer', 29, [100, 128]))] };
+  return { leaf: [null, leaf(leafTexture('heart', 8, [96, 126])), leaf(leafTexture('oval', 12, [84, 110])), null, leaf(leafTexture('conifer', 23, [138, 162])), null] }; // shrub / hedge leaf sets (trees use the glb atlas)
 }
 
 // ------------------------------------------------------------------ crown / geometry construction
@@ -85,73 +87,21 @@ function cards(b, lobes, n, size, rng, o = {}) {
     b.quad(ids[0], ids[1], ids[2], ids[3]);
   }
 }
-const BARK = { plane: lin('#7d7868'), plane2: lin('#4c4a3a'), round: lin('#3d3027'), poplar: lin('#4a4238'), pine: lin('#5a3a28'), cyp: lin('#3a2c24') };
 const CORE = lin('#4a9040'), CORE2 = lin('#52a047'), CORECONIF = lin('#2a7050');
 
-function tubeBark(b, p0, p1, r0, r1, seg, c0, c1) { // GeoBuilder.tube with the bark uv
-  const n0 = b.n; b.tube(p0, p1, r0, r1, seg, c0, c1); for (let i = n0; i < b.n; i++) { b.uv[i * 2] = BARK_UV[0]; b.uv[i * 2 + 1] = BARK_UV[1]; }
-}
-function trunk(b, rng, x, z, h0, h1, r0, r1, col, col2, seg = 7, wob = 0.12) {
-  let p = [x, -0.1, z]; const ang = rng() * 6.28, dx = Math.cos(ang) * wob, dz = Math.sin(ang) * wob, n = 3;
-  for (let i = 0; i < n; i++) {
-    const t0 = i / n, t1 = (i + 1) / n, q = [x + dx * t1 * t1 * h1, h0 + (h1 - h0) * t1, z + dz * t1 * t1 * h1];
-    tubeBark(b, p, q, r0 + (r1 - r0) * t0, r0 + (r1 - r0) * t1, seg, mix(col, col2, t0 * 0.6 + rng() * 0.25), mix(col, col2, t1 * 0.6 + rng() * 0.25)); p = q;
+// ------------------------------------------------------------------ far impostor: one tile (crown + trunk), 3 crossed quads
+function impostorTexture() {
+  const W = 128, Hh = 256, [c, ctx] = canvas(W, Hh), rng = mkRng(404);
+  const cx = W / 2, crownTop = 8, crownBot = Hh * 0.7, cyy = (crownTop + crownBot) / 2, rx = W * 0.47, ry = (crownBot - crownTop) / 2;
+  ctx.fillStyle = '#d8d4c8'; ctx.fillRect(cx - 2.5, crownBot - 40, 5, Hh - crownBot + 40); // pale birch trunk
+  for (let k = 0; k < 1100; k++) {
+    const a = rng() * 6.283, rr = Math.pow(rng(), 0.85), shape = 1 - 0.35 * Math.pow((rr * Math.sin(a)) , 2) * 0, px = cx + Math.cos(a) * rx * rr * shape, py = cyy + Math.sin(a) * ry * rr;
+    const light = 17 + (1 - (py - crownTop) / (crownBot - crownTop)) * 20 + rng() * 9, s = 2.2 + rng() * 3.6;
+    ctx.fillStyle = `hsl(${72 + rng() * 28},${30 + rng() * 14}%,${light}%)`; ctx.beginPath(); ctx.ellipse(px, py, s, s * 0.8, rng() * 3, 0, 7); ctx.fill();
   }
-  return p;
-}
-function limb(b, rng, from, to, r0, col) {
-  const mid = [(from[0] + to[0]) / 2 + (rng() - 0.5) * 0.4, (from[1] + to[1]) / 2 + 0.2, (from[2] + to[2]) / 2 + (rng() - 0.5) * 0.4];
-  tubeBark(b, from, mid, r0, r0 * 0.7, 5, col, col); tubeBark(b, mid, to, r0 * 0.7, r0 * 0.38, 5, col, col);
-}
-
-// species specs. R/H nominal crown radius / total height (metres).
-const SPEC = [
-  { name: 'plane', R: 5.4, H: 15, trunkH: 4.6, trunkR: 0.3, cards: [120, 36], size: [2.5, 4.2], lobes: (R, H) => [{ c: [0, 0.72 * H, 0], r: [0.62 * R, 0.2 * H, 0.62 * R] }, { c: [0.45 * R, 0.62 * H, 0.1 * R], r: [0.55 * R, 0.19 * H, 0.52 * R] }, { c: [-0.4 * R, 0.65 * H, 0.28 * R], r: [0.52 * R, 0.18 * H, 0.5 * R] }, { c: [0.08 * R, 0.66 * H, -0.45 * R], r: [0.5 * R, 0.17 * H, 0.5 * R] }, { c: [-0.12 * R, 0.86 * H, -0.08 * R], r: [0.48 * R, 0.13 * H, 0.48 * R] }], core: CORE, V: 3 },
-  { name: 'round', R: 3.6, H: 9.5, trunkH: 2.5, trunkR: 0.17, cards: [84, 28], size: [1.7, 2.9], lobes: (R, H) => [{ c: [0, 0.62 * H, 0], r: [R, 0.36 * H, R] }, { c: [0.45 * R, 0.5 * H, 0.2 * R], r: [0.55 * R, 0.24 * H, 0.55 * R] }, { c: [-0.4 * R, 0.52 * H, -0.25 * R], r: [0.5 * R, 0.22 * H, 0.5 * R] }], core: CORE2, V: 2 },
-  { name: 'mulberry', R: 4.0, H: 7.5, trunkH: 1.9, trunkR: 0.2, cards: [96, 30], size: [1.8, 3.0], lobes: (R, H) => [{ c: [0, 0.6 * H, 0], r: [R, 0.4 * H, R] }, { c: [0.5 * R, 0.5 * H, 0.35 * R], r: [0.6 * R, 0.3 * H, 0.6 * R] }, { c: [-0.5 * R, 0.52 * H, -0.3 * R], r: [0.58 * R, 0.3 * H, 0.58 * R] }, { c: [0.1 * R, 0.55 * H, -0.55 * R], r: [0.5 * R, 0.28 * H, 0.5 * R] }], core: CORE, V: 2 },
-  { name: 'poplar', R: 1.5, H: 15, trunkH: 2.2, trunkR: 0.16, cards: [76, 22], size: [1.4, 2.4], lobes: (R, H) => [{ c: [0, 0.56 * H, 0], r: [R, 0.4 * H, R] }, { c: [0, 0.3 * H, 0], r: [0.8 * R, 0.16 * H, 0.8 * R] }, { c: [0, 0.82 * H, 0], r: [0.6 * R, 0.16 * H, 0.6 * R] }], core: CORE2, upright: true, V: 1 },
-  { name: 'cypress', R: 1.0, H: 6, trunkH: 0.2, trunkR: 0.08, cards: [60, 18], size: [1.3, 2.2], lobes: (R, H) => [0.18, 0.34, 0.5, 0.66, 0.82].map(t => ({ c: [0, t * H, 0], r: [R * (1.05 - t * 0.7), 0.2 * H, R * (1.05 - t * 0.7)] })), core: CORECONIF, upright: true, V: 1 },
-  { name: 'pine', R: 3.6, H: 13, trunkH: 8.5, trunkR: 0.22, cards: [84, 26], size: [2.6, 4.2], lobes: (R, H) => [{ c: [0.3 * R, 0.78 * H, 0.1 * R], r: [0.7 * R, 0.1 * H, 0.7 * R] }, { c: [-0.35 * R, 0.84 * H, 0.25 * R], r: [0.6 * R, 0.09 * H, 0.6 * R] }, { c: [0.05 * R, 0.94 * H, -0.1 * R], r: [0.5 * R, 0.08 * H, 0.5 * R] }, { c: [0.5 * R, 0.62 * H, -0.35 * R], r: [0.55 * R, 0.08 * H, 0.55 * R] }, { c: [-0.55 * R, 0.66 * H, -0.2 * R], r: [0.5 * R, 0.08 * H, 0.5 * R] }], core: CORECONIF, V: 2 },
-];
-function buildSpecies(sp, idx, variant) {
-  const rng = mkRng(100 + idx * 13 + variant * 977), R = sp.R, H = sp.H;
-  const jit = variant ? 0.14 : 0; // later variants: shift / squash the lobes for a different silhouette
-  const lobes = sp.lobes(R, H).map(l => ({ c: [l.c[0] + (rng() - 0.5) * R * jit * 2, l.c[1] * (1 + (rng() - 0.5) * jit), l.c[2] + (rng() - 0.5) * R * jit * 2], r: l.r.map(v => v * (1 + (rng() - 0.5) * jit * 1.4)) }));
-  const barkCol = idx === 0 ? BARK.plane : idx === 3 ? BARK.poplar : idx === 5 ? BARK.pine : idx === 4 ? BARK.cyp : BARK.round;
-  const barkCol2 = idx === 0 ? BARK.plane2 : mul(barkCol, 0.6);
-  const build = (nCards, sizeMul, limbs, coreDetail) => {
-    const b = new GeoBuilder(); const top = idx === 4 ? [0, 0.2, 0] : trunk(b, mkRng(5 + idx + variant), 0, 0, 0, sp.trunkH, sp.trunkR * 1.25, sp.trunkR * 0.8, barkCol, barkCol2, 7, idx === 5 ? 0.05 : 0.12);
-    if (limbs && idx !== 4) for (const L of lobes) limb(b, rng, [top[0], top[1] - 0.2, top[2]], [L.c[0] * 0.8, L.c[1] - L.r[1] * 0.35, L.c[2] * 0.8], sp.trunkR * (idx === 5 ? 0.4 : 0.55), barkCol2);
-    if (coreDetail >= 0) for (const L of lobes) lump(b, L.c, [L.r[0] * 0.62, L.r[1] * 0.62, L.r[2] * 0.62], sp.core, rng, coreDetail, 0.12, 0.45);
-    cards(b, lobes, nCards, sp.size[0] * sizeMul, rng, { H, col: [1, 1, 1], upright: sp.upright, skyBias: true, centre: [0, 0.62 * H, 0] });
-    return b.build();
-  };
-  return { lod0: build(sp.cards[0], 1, true, 0), lod1: build(sp.cards[1], 1.9, false, 0), lobes };
-}
-
-// ------------------------------------------------------------------ far impostors: 6 tiles, crossed quads
-function impostorAtlas(variantLobes) {
-  const T = 256, [c, ctx] = canvas(T * 3, T * 2), rng = mkRng(404);
-  SPEC.forEach((sp, i) => {
-    const x0 = (i % 3) * T, y0 = Math.floor(i / 3) * T, W = sp.R * 2.3, H = sp.H, lobes = variantLobes[i];
-    const P = (x, y) => [x0 + (x / W + 0.5) * T, y0 + (1 - y / H) * T];
-    ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, T, T); ctx.clip();
-    // trunk
-    const [tx, ty] = P(0, 0), [, ty2] = P(0, Math.min(sp.trunkH * 1.15, H * 0.6)); ctx.fillStyle = i === 0 ? '#8a8576' : i === 5 ? '#5a3a28' : '#4a3a2c'; if (i !== 4) ctx.fillRect(tx - Math.max(2, sp.trunkR / W * T), ty2, Math.max(4, sp.trunkR * 2 / W * T), ty - ty2 + 2);
-    const hue = i >= 4 ? [135, 160] : [92, 118];
-    for (const L of lobes) {
-      const [cx, cy] = P(L.c[0], L.c[1]), rx = L.r[0] / W * T * 1.05, ry = L.r[1] / H * T * 1.05, n = Math.round(rx * ry * 0.09);
-      for (let k = 0; k < n; k++) {
-        const a = rng() * 6.283, rr = Math.sqrt(rng()), px = cx + Math.cos(a) * rx * rr, py = cy + Math.sin(a) * ry * rr, light = 14 + (1 - (py - (cy - ry)) / (2 * ry)) * 26 + rng() * 10, s = 2.5 + rng() * 4.5;
-        ctx.fillStyle = `hsl(${hue[0] + rng() * (hue[1] - hue[0])},${38 + rng() * 14}%,${light}%)`; ctx.beginPath(); ctx.ellipse(px, py, s, s * 0.8, rng() * 3, 0, 7); ctx.fill();
-      }
-    }
-    ctx.restore();
-  });
   const t = canvasTex(c, { aniso: 4 }); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t;
 }
 function impostorGeo() {
-  // 3 crossed vertical quads (width 1 centred, height 1 from the ground); tile offset per instance
   const g = new THREE.BufferGeometry(), pos = [], nor = [], uv = [], idx = []; let n = 0;
   for (let k = 0; k < 3; k++) {
     const a = k * Math.PI / 3, c = Math.cos(a), s = Math.sin(a);
@@ -161,6 +111,20 @@ function impostorGeo() {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
   const col = new Float32Array((pos.length / 3) * 3); for (let i = 0; i < pos.length / 3; i++) { const sh = 0.7 + 0.3 * pos[i * 3 + 1]; col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = sh; }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3)); return g;
+}
+
+// ------------------------------------------------------------------ tree model (public/props/trees.glb, built by tools/build-tree.mjs from tree_animate.glb)
+// 3 birch-like variants x 2 LODs (near ~2k tris / mid ~0.5k tris), one atlas material.
+async function loadTreeModel(mat) {
+  const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+  const [gltf, meta] = await Promise.all([loader.loadAsync('/props/trees.glb'), fetch('/props/trees.json').then(r => r.json())]);
+  const vars = meta.variants.map(v => ({ H: v.H, R: v.R, lod: [null, null] }));
+  gltf.scene.traverse(o => {
+    if (!o.isMesh) return; const m = /^v(\d+)_lod(\d+)$/.exec(o.name); if (!m) return;
+    if (!mat.map) { mat.map = o.material.map; mat.map.anisotropy = quality.anisotropy; mat.needsUpdate = true; }
+    vars[+m[1]].lod[+m[2]] = o.geometry;
+  });
+  return vars;
 }
 
 // ------------------------------------------------------------------ bushes
@@ -175,55 +139,42 @@ function buildBush(kind) {
 }
 
 // ------------------------------------------------------------------ build
-export function buildVegetation({ scene, H, data }) {
+export async function buildVegetation({ scene, H, data }) {
   const mats = makeMats(), td = quality.treeDetail, ps = quality.propScale;
   const group = new THREE.Group(); group.name = 'vegetation'; scene.add(group);
   const families = [];
   const mk = (geo, mat, n, colArr, map) => { const im = instanced(geo, mat, n, !!colArr); if (colArr) map.set(im, colArr); group.add(track(im)); return im; };
-  // ---- trees
-  const tr = data.trees, N = tr.length / 7, bySp = SPEC.map(() => []);
+  // ---- trees: every placed tree is one of the 3 model variants, scaled to its data height / crown radius
+  const treeMat = patchFoliage(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.4, alphaToCoverage: true }), { flutter: 1, warm: 1, sway: true, swayK: 0.0013 });
+  const vars = await loadTreeModel(treeMat), NV = vars.length;
+  const tr = data.trees, N = tr.length / 7, byVar = vars.map(() => []);
   const keepTree = i => { const rad = tr[i * 7 + 3]; if (rad >= 3.2) return true; return ((Math.imul(i, 2654435761) >>> 8) & 0xffff) / 65536 < Math.max(ps, 0.45); };
-  for (let i = 0; i < N; i++) if (keepTree(i)) bySp[tr[i * 7 + 2]].push(i);
+  for (let i = 0; i < N; i++) if (keepTree(i)) byVar[Math.min(NV - 1, Math.floor(((tr[i * 7 + 6] * 37.7) % 1) * NV))].push(i);
   const D0 = td >= 2 ? 62 : td === 1 ? 38 : 0, D1 = td >= 2 ? 165 : td === 1 ? 130 : 95, DF = td >= 2 ? 1300 : td === 1 ? 950 : 650;
-  const variantLobes = [];
-  const impM = new Float32Array(N * 16), impC = new Float32Array(N * 3), impT = new Float32Array(N * 2);
-  const tileOf = si => [(si % 3) / 3, 1 - (Math.floor(si / 3) + 1) / 2];
-  SPEC.forEach((sp, si) => {
-    const idxs = bySp[si]; if (!idxs.length) return;
-    const nv = sp.V, vgeo = [];
-    for (let v = 0; v < nv; v++) vgeo.push(buildSpecies(sp, si, v));
-    variantLobes[si] = vgeo[0].lobes;
-    const byVar = Array.from({ length: nv }, () => []);
-    const col = new Float32Array(N * 3);
-    for (const src of idxs) {
-      const t = tr[src * 7 + 6], v = Math.min(nv - 1, Math.floor(((t * 37.7) % 1) * nv)); byVar[v].push(src);
-      const x = tr[src * 7], z = tr[src * 7 + 1], rad = tr[src * 7 + 3], h = tr[src * 7 + 4], rot = tr[src * 7 + 5];
-      let c; if (t > 0.9) c = [1.25, 1.15, 0.6]; else if (t > 0.82) c = [1.05, 1.1, 0.7]; else if (t < 0.12) c = [0.7, 0.85, 0.75]; else { const vv = 0.82 + t * 0.3; c = [vv * 0.98, vv, vv * 0.92]; }
-      col.set(c, src * 3); impC.set(c, src * 3);
-      composeInto(impM, src, x, H(x, z) + 0.02, z, rot, rad / sp.R * 2.3 * sp.R * 1.0, h, rad / sp.R * 2.3 * sp.R * 1.0); // crown width = 2.3 R (tile width), height = h
-      impT[src * 2] = tileOf(si)[0]; impT[src * 2 + 1] = tileOf(si)[1];
-    }
-    byVar.forEach((list, v) => {
-      const n = list.length; if (!n) return;
-      const m = new Float32Array(n * 16), lc = new Float32Array(n * 3);
-      list.forEach((src, k) => { const x = tr[src * 7], z = tr[src * 7 + 1], rad = tr[src * 7 + 3], h = tr[src * 7 + 4], rot = tr[src * 7 + 5], sxz = rad / sp.R, sy = h / sp.H; composeInto(m, k, x, H(x, z) + 0.02, z, rot, sxz, sy, sxz); lc.set(col.subarray(src * 3, src * 3 + 3), k * 3); });
-      const cm = new Map(), levels = [];
-      if (D0 > 0) levels.push({ dist: D0, meshes: [mk(vgeo[v].lod0, mats.leaf[si], n, lc, cm)] });
-      levels.push({ dist: D1, meshes: [mk(vgeo[v].lod1, mats.leaf[si], n, lc, cm)] });
-      families.push(new CellFamily({ n, m, levels, itemColors: cm, radius: sp.R * 1.4, mid: sp.H * 0.55, scale: quality.lodScale, minMove: 2, name: sp.name + v }));
+  const impM = new Float32Array(N * 16), impC = new Float32Array(N * 3), keepSet = new Uint8Array(N);
+  vars.forEach((V, vi) => {
+    const idxs = byVar[vi], n = idxs.length; if (!n) return;
+    const m = new Float32Array(n * 16), lc = new Float32Array(n * 3), Rc = V.R * 0.62;
+    idxs.forEach((src, k) => {
+      const x = tr[src * 7], z = tr[src * 7 + 1], rad = tr[src * 7 + 3], h = tr[src * 7 + 4], rot = tr[src * 7 + 5], t = tr[src * 7 + 6];
+      const sy = clamp(h / V.H, 0.45, 1.6), sxz = clamp(rad / Rc, sy * 0.5, sy * 1.5), y = H(x, z) + 0.02;
+      composeInto(m, k, x, y, z, rot, sxz, sy, sxz);
+      let c; if (t > 0.9) c = [1.2, 1.1, 0.62]; else if (t > 0.82) c = [1.05, 1.08, 0.72]; else if (t < 0.12) c = [0.72, 0.86, 0.76]; else { const vv = 0.84 + t * 0.28; c = [vv * 0.98, vv, vv * 0.92]; }
+      lc.set(c, k * 3); impC.set(c, src * 3); keepSet[src] = 1;
+      composeInto(impM, src, x, y, z, rot, V.R * 1.7 * sxz, V.H * sy, V.R * 1.7 * sxz);
     });
+    const cm = new Map(), levels = [];
+    if (D0 > 0) levels.push({ dist: D0, meshes: [mk(V.lod[0], treeMat, n, lc, cm)] });
+    levels.push({ dist: D1, meshes: [mk(V.lod[1], treeMat, n, lc, cm)] });
+    families.push(new CellFamily({ n, m, levels, itemColors: cm, radius: V.R * 1.3, mid: V.H * 0.55, scale: quality.lodScale, minMove: 2, name: 'tree' + vi }));
   });
   // crossed-quad impostors for every tree beyond the mid level
   {
-    const all = [].concat(...bySp), keepSet = new Uint8Array(N); for (const i of all) keepSet[i] = 1;
-    const atlas = impostorAtlas(variantLobes.map((l, i) => l ?? SPEC[i].lobes(SPEC[i].R, SPEC[i].H)));
-    const geo = impostorGeo(); const tileAttr = new THREE.InstancedBufferAttribute(new Float32Array(N * 2), 2); tileAttr.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aTile', tileAttr);
-    const mat = patchFoliage(new THREE.MeshStandardMaterial({ map: atlas, vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.45, alphaToCoverage: true }), { flutter: 0, warm: 0.8, sway: false });
-    const base = mat.onBeforeCompile;
-    mat.onBeforeCompile = sh => { base(sh); sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aTile;').replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n vMapUv = uv * vec2(0.3333333, 0.5) + aTile;\n#endif'); };
+    const geo = impostorGeo();
+    const mat = patchFoliage(new THREE.MeshStandardMaterial({ map: impostorTexture(), vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.45, alphaToCoverage: true }), { flutter: 0, warm: 0.8, sway: false });
     mat.customProgramCacheKey = () => 'impostor';
     const cm = new Map(), im = mk(geo, mat, N, impC, cm);
-    families.push(new CellFamily({ n: N, m: impM, levels: [{ dist: D1, meshes: [] }, { dist: DF, meshes: [im] }], itemColors: cm, extras: [{ mesh: im, attr: tileAttr, data: impT, size: 2 }], radius: 9, mid: 6, scale: quality.lodScale, keep: i => keepSet[i] === 1, minMove: 6, name: 'impostors' }));
+    families.push(new CellFamily({ n: N, m: impM, levels: [{ dist: D1, meshes: [] }, { dist: DF, meshes: [im] }], itemColors: cm, radius: 11, mid: 6, scale: quality.lodScale, keep: i => keepSet[i] === 1, minMove: 6, name: 'impostors' }));
   }
   // ---- bushes / hedges
   {
