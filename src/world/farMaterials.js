@@ -12,7 +12,8 @@ const GLSL = /* glsl */`
     vec2 u3 = vec2((xz.x + 17600.) / 35200., 1. - (xz.y + 17600.) / 35200.);
     vec3 c = texture2D(uFar, u3).rgb;
     c = mix(c, texture2D(uMid, u2).rgb, 1.0 - smoothstep(3600., 4400., d));
-    return mix(c, near, 1.0 - smoothstep(900., 1100., d));
+    float dn = max(abs(xz.x + 768.), abs(xz.y + 1280.));          // distance from the centre of the near-field (extended city) window, half-size 2304 m
+    return mix(c, near, 1.0 - smoothstep(2080., 2290., dn));
   }
   float fhash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 `;
@@ -41,7 +42,7 @@ export function createFarMaterials(shared, renderer) {
 
   // ---- terrain: aerial cascade + night city lights (R = road glow, G = building coverage; +-4400 m)
   F.far_terrain = patch(new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 }), shared, `
-    vec3 aerN = texture2D(uNear, vec2((vWP.x + 1100.) / 2200., 1. - (vWP.z + 1100.) / 2200.)).rgb;
+    vec3 aerN = texture2D(uNear, vec2((vWP.x + 3072.) / 4608., 1. - (vWP.z + 3584.) / 4608.)).rgb;
     diffuseColor.rgb = farAerial(vWP.xz, aerN) * mix(uGain, 0.62, uDay);
     vec2 lu = vec2((vWP.x + 4400.) / 8800., 1. - (vWP.z + 4400.) / 8800.);
     float inLights = 1.0 - smoothstep(3900., 4400., max(abs(vWP.x), abs(vWP.z)));
@@ -53,7 +54,7 @@ export function createFarMaterials(shared, renderer) {
   // ---- simplified buildings: wall colour + procedural windows, roofs from the aerial photo
   F.far_building = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }), shared, `
     float roofK = step(0.7, vWN.y);
-    vec3 aerN2 = texture2D(uNear, vec2((vWP.x + 1100.) / 2200., 1. - (vWP.z + 1100.) / 2200.)).rgb;
+    vec3 aerN2 = texture2D(uNear, vec2((vWP.x + 3072.) / 4608., 1. - (vWP.z + 3584.) / 4608.)).rgb;
     vec3 roofCol = farAerial(vWP.xz, aerN2) * mix(0.95, 0.62, uDay);
     vec2 cell = vFUv / vec2(3.5, 3.2); vec2 fc = fract(cell), id = floor(cell);
     vec2 wv = step(vec2(0.2, 0.22), fc) - step(vec2(0.76, 0.8), fc); float win = wv.x * wv.y;

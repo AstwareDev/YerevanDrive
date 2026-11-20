@@ -1,4 +1,4 @@
-// Multi-resolution terrain height model: fine 5 m (+-1100) -> mid 10 m (+-4400) -> far 80 m (+-17600). 0 = Republic Square ground.
+// Multi-resolution terrain height model: fine 5 m (+-3800) -> mid 10 m (+-4400) -> far 80 m (+-17600). 0 = Republic Square ground.
 import fs from 'node:fs';
 function load(name, blur) {
   const meta = JSON.parse(fs.readFileSync(`data/${name}.json`, 'utf8')), b = fs.readFileSync(`data/${name}.bin`);
@@ -16,9 +16,8 @@ const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
 /** Height at (x,z) blending the three grids across their borders. */
 export function Hall(x, z) {
   const d = Math.max(Math.abs(x), Math.abs(z));
-  if (d < 900) return bil(fine, x, z);
-  if (d < 1100) return bil(fine, x, z) * (1 - sm(900, 1100, d)) + bil(mid, x, z) * sm(900, 1100, d);
-  if (d < 3800) return bil(mid, x, z);
+  if (d < 3300) return bil(fine, x, z);
+  if (d < 3800) return bil(fine, x, z) * (1 - sm(3300, 3800, d)) + bil(mid, x, z) * sm(3300, 3800, d);
   if (d < 4300) return bil(mid, x, z) * (1 - sm(3800, 4300, d)) + bil(far, x, z) * sm(3800, 4300, d);
   return bil(far, x, z);
 }

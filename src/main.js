@@ -127,6 +127,16 @@ const tod = { day: 0, night: 1 };   // shared with plugins: read tod.night (0..1
     dummy.position.set(x + dx * 2.4, y + 0.19, z + dz * 2.4); dummy.rotation.set(0, 0, 0); dummy.scale.set(R, 1, R); dummy.updateMatrix(); pool.setMatrixAt(i, dummy.matrix);
     lampHeads.push(new THREE.Vector3(x + dx * 1.8, y + h - 0.3, z + dz * 1.8));
   }
+  {   // dense avenues (lamps every ~15 m, both sides) stack their additive glow pools and wash the whole road out: scale each pool by how many neighbours it overlaps
+    const CELLG = 14, grid = new Map(), keyOf = (x, z) => Math.floor(x / CELLG) + ',' + Math.floor(z / CELLG), L = meta.lamps, col = new THREE.Color();
+    for (let i = 0; i < n; i++) { const k = keyOf(L[i * 6], L[i * 6 + 2]); (grid.get(k) ?? grid.set(k, []).get(k)).push(i); }
+    for (let i = 0; i < n; i++) {
+      const x = L[i * 6], z = L[i * 6 + 2], gx = Math.floor(x / CELLG), gz = Math.floor(z / CELLG); let cnt = 0;
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (const j of grid.get((gx + dx) + ',' + (gz + dz)) ?? []) if (j !== i && Math.hypot(L[j * 6] - x, L[j * 6 + 2] - z) < 20) cnt++;
+      pool.setColorAt(i, col.setScalar(1 / (1 + 1.15 * cnt)));
+    }
+    pool.instanceColor.needsUpdate = true;
+  }
   pool.renderOrder = 5; pool.frustumCulled = false;
   scene.add(pole, arm, head, pool);
 }
@@ -145,12 +155,16 @@ const tod = { day: 0, night: 1 };   // shared with plugins: read tod.night (0..1
 
 // ------------------------------------------------------------ plug-in modules (landmarks.js, props.js): each default-exports async (ctx) => ({ update?(dt, camera, time) })
 const heightAt = await loadHeight();
-if (quality.reflections) { ssr = createSSR({ camera, heightGrid: heightAt.grid, wetness, quality }); ssr.uniforms.tDepth.value = depthTex; composer.insertPass(ssr, 2); }
+if (quality.reflections) { ssr = createSSR({ camera, heightGrid: heightAt.grid, wetness, quality }); ssr.uniforms.tDepth.value = depthTex; composer.insertPass(ssr, 1); }   // index 1 = straight after RenderPass: it must write to rt1, not to rt2 (whose depth texture it samples)
 const pluginUpdates = [];
+// shared with the car plug-in (src/car.js): drive mode takes over the camera, `focus` feeds the shadow frustum / lamp lights
+const drive = { active: false, wanted: false, uiLock: false, focus: new THREE.Vector3(), set(v) { setMode(v ? 'drive' : 'orbit'); } };
 {
-  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js']);
+  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js']);
+  const wantCircuits = new URLSearchParams(location.search).get('circuits') === '1';     // the race circuits are off by default: free roam (?circuits=1 restores them)
   for (const [path, load] of Object.entries(found)) {
-    try { const mod = await load(); const api = await mod.default({ THREE, scene, renderer, camera, M, T, meta, H: heightAt, lampHeads, tod }); if (api?.update) pluginUpdates.push(api.update); console.log('plugin loaded', path); }
+    if (path.endsWith('circuits.js') && !wantCircuits) continue;
+    try { const mod = await load(); const api = await mod.default({ THREE, scene, renderer, camera, M, T, meta, H: heightAt, lampHeads, tod, drive }); if (api?.update) pluginUpdates.push(api.update); console.log('plugin loaded', path); }
     catch (e) { console.error('plugin failed', path, e); }
   }
 }
@@ -215,21 +229,28 @@ orbit.target.set(0, 4, 0); orbit.enableDamping = true; orbit.maxPolarAngle = Mat
 let mode = 'orbit';
 const keys = new Set(); let flySpeed = 25, yaw = 0, pitch = -0.2, dragging = false;
 function setMode(m) {
-  mode = m; orbit.enabled = m === 'orbit'; car.visible = m === 'tour';
+  mode = m; orbit.enabled = m === 'orbit'; car.visible = m === 'tour'; drive.active = m === 'drive'; $('hud').classList.toggle('hidden', m === 'drive');
   if (m === 'fly') { const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ'); yaw = e.y; pitch = e.x; }
   if (m === 'tour') { camPos.copy(camera.position); }
-  $('mode').textContent = { orbit: 'ORBIT', fly: 'FLY', tour: 'TOUR' }[m];
+  $('mode').textContent = { orbit: 'ORBIT', fly: 'FLY', tour: 'TOUR', drive: 'DRIVE' }[m];
 }
+// free camera looking at a point of the map (used by the map's "View in 3D")
+drive.lookAt = (x, z, dist = 240) => {
+  setMode('orbit'); const y = heightAt(x, z); orbit.target.set(x, y + 6, z);
+  camera.position.set(x + dist * 0.18, y + dist * 0.62, z + dist * 0.8); orbit.update(); focus.copy(orbit.target);
+};
 addEventListener('keydown', e => {
+  if (e.target?.closest?.('input,textarea,[contenteditable]')) return;      // typing in the map search
   keys.add(e.code);
-  if (e.code === 'Digit1') setMode('orbit'); if (e.code === 'Digit2') setMode('fly'); if (e.code === 'Digit3') setMode('tour');
-  if (e.code === 'KeyN') { tourIdx = (tourIdx + 1) % tours.length; tourS = 0; }
+  if (e.code === 'Digit1') setMode('orbit'); if (e.code === 'Digit2') setMode('fly'); if (e.code === 'Digit3') setMode('tour'); if (e.code === 'Digit4') setMode('drive');
+  if (e.code === 'KeyN' && mode !== 'drive') { tourIdx = (tourIdx + 1) % tours.length; tourS = 0; }
   if (e.code === 'KeyB') bloom.enabled = !bloom.enabled;
-  if (e.code === 'KeyR') wetness.value = wetness.value > 0.5 ? 0.0 : 1.0;
+  if (e.code === 'KeyR' && mode !== 'drive') wetness.value = wetness.value > 0.5 ? 0.0 : 1.0;
   if (e.code === 'KeyH') $('hud').classList.toggle('hidden');
+  if (e.code === 'KeyO' && mode === 'drive') wetness.value = wetness.value > 0.5 ? 0.0 : 1.0;
   if (e.code === 'KeyT') todTarget = todTarget > 0.5 ? 0 : 1;
 });
-addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('keyup', e => keys.delete(e.code), true);
 renderer.domElement.addEventListener('pointerdown', e => { if (mode === 'fly') { dragging = true; renderer.domElement.setPointerCapture(e.pointerId); } });
 renderer.domElement.addEventListener('pointerup', () => { dragging = false; });
 renderer.domElement.addEventListener('pointermove', e => { if (mode === 'fly' && dragging) { yaw -= e.movementX * 0.0035; pitch = Math.max(-1.5, Math.min(1.5, pitch - e.movementY * 0.0035)); } });
@@ -240,8 +261,9 @@ function fitSize() {
   camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h); composer.setSize(w, h); bloom.setSize(w, h);
 }
 
+if (drive.wanted) setMode('drive');
 // deterministic hooks for screenshots/tests
-window.__yerevan = { THREE, tod, streamer, quality, setTod(v) { todTarget = v; applyTod(v); }, setMode, camera, orbit, setCam(px, py, pz, tx, ty, tz) { setMode('orbit'); camera.position.set(px, py, pz); orbit.target.set(tx, ty, tz); orbit.update(); }, bloom, renderer, scene, wetness, tourStart(i, s) { tourIdx = i; tourS = s; setMode('tour'); } };
+window.__yerevan = { drive, THREE, tod, streamer, quality, setTod(v) { todTarget = v; applyTod(v); }, setMode, camera, orbit, setCam(px, py, pz, tx, ty, tz) { setMode('orbit'); camera.position.set(px, py, pz); orbit.target.set(tx, ty, tz); orbit.update(); }, bloom, renderer, scene, wetness, tourStart(i, s) { tourIdx = i; tourS = s; setMode('tour'); } };
 
 // ------------------------------------------------------------ loop
 $('loading').classList.add('done');
@@ -281,6 +303,9 @@ renderer.setAnimationLoop(() => {
   sky.position.copy(camera.position);
   if (clock.elapsedTime - statT > 1) { statT = clock.elapsedTime; $('stats').textContent = `${(streamer.stat.tris / 1e6).toFixed(2)}M tris · ${streamer.stat.shown} tiles shown · ${streamer.stat.loaded} loaded · q=${quality.level}${governor.level ? '-' + governor.level : ''}`; }
   if (ssr) ssr.update(clock.elapsedTime, scene.fog.color, tod.day);
+  // EffectComposer never resets its ping-pong pair: with an odd number of swapping passes (NaN guard + SSR + Output = 3) the scene alternated
+  // between rt2 (has the depth texture) and rt1 (doesn't) every frame, so SSR saw fresh depth only on every other frame -> flicker.
+  composer.readBuffer = composer.renderTarget2; composer.writeBuffer = composer.renderTarget1;
   composer.render();
   frames++; acc += dt; if (acc >= 0.5) { $('fps').textContent = (frames / acc).toFixed(0) + ' fps'; frames = 0; acc = 0; }
 });

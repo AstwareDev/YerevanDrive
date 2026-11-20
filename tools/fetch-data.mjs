@@ -1,7 +1,7 @@
 // Downloads OSM vector data (Overpass) + elevation (AWS Terrain Tiles, Terrarium encoding).
 import fs from 'node:fs';
 import { PNG } from 'pngjs';
-import { CENTER, HALF, bbox, project } from './config.mjs';
+import { CENTER, HALF, FINE_R, bbox, project } from './config.mjs';
 
 const UA = 'YerevanCityDrift/0.1 (hobby game map build)';
 fs.mkdirSync('data', { recursive: true });
@@ -69,7 +69,7 @@ const Z = 15;
 const n = 2 ** Z;
 const lonToX = lon => (lon + 180) / 360 * n;
 const latToY = lat => (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n;
-const e = bbox(200);
+const e = bbox(FINE_R - HALF + 200);
 const x0 = Math.floor(lonToX(e.west)), x1 = Math.floor(lonToX(e.east));
 const y0 = Math.floor(latToY(e.north)), y1 = Math.floor(latToY(e.south));
 const tiles = {};
@@ -97,7 +97,7 @@ const sample = (lat, lon) => {          // bilinear over the tile mosaic, metres
 };
 
 // Regular grid in local metres, 5 m spacing, covering the map + margin.
-const STEP = 5, R = HALF + 100, N = Math.round(2 * R / STEP) + 1;
+const STEP = 5, R = FINE_R, N = Math.round(2 * R / STEP) + 1;
 const MPL = 110946, MPLON = 111320 * Math.cos(CENTER.lat * Math.PI / 180);
 const grid = new Float32Array(N * N);
 for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {

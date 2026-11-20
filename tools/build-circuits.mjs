@@ -526,6 +526,33 @@ function finalise(ch, id, name, nameHy, kind) {
   // keep-out discs for other generators (props, parked cars, trees): areas occupied by the pit complex / stands / start gantry
   const keepout = [{ kind: 'pit', x: pit.x, z: pit.z, r: 46 }, { kind: 'gantry', x: r2(pts[0].x), z: r2(pts[0].z), r: 12 }];
   for (const s of stands) { const [sx, sz] = offPt(s.index, s.side === 'R' ? 1 : -1, pts[s.index].w / 2 + 9); keepout.push({ kind: 'stands', x: r2(sx), z: r2(sz), r: 34 }); }
+  // collider polylines for physics: tyre walls (outside of corners), junction-mouth jersey barriers, guardrails on free edge runs.
+  // Same placement rules as src/circuits/dress.js (the visual density of rails/jersey varies with quality; colliders are the full set).
+  const barriers = [];
+  {
+    const cov = [new Uint8Array(n), new Uint8Array(n)];
+    const edgeLine = (i0, len, sg, off) => { const out = [], m = Math.max(1, Math.ceil(len * ds / 2)); for (let k = 0; k <= m; k++) { const i = mod(Math.round(i0 + len * k / m), n), f = frame(i), x = pts[i].x - f[1] * sg * (pts[i].w / 2 + off), z = pts[i].z + f[0] * sg * (pts[i].w / 2 + off); out.push([r2(x), r2(H(x, z) + 0.09), r2(z)]); } return out; };
+    const markC = (a, i0, len, v) => { for (let q = 0; q <= len; q++) { const i = mod(Math.round(i0 + q), n); if (!a[i]) a[i] = v; } };
+    for (const co of corners) {
+      if (co.severity < 2) continue;
+      const sg = co.dir === 'R' ? -1 : 1, sev = co.severity, pre = sev >= 4 ? 18 : sev === 3 ? 10 : 6, post = sev >= 4 ? 38 : sev === 3 ? 26 : 14, cols = sev >= 3 ? 2 : 1, rows = sev >= 3 ? 3 : 2;
+      const i0 = co.entry - pre / ds, len = (pre + co.len + post) / ds;
+      barriers.push({ kind: 'tyres', corner: co.n, side: sg > 0 ? 'R' : 'L', h: r2(rows * 0.255), w: r2(cols * 0.64), pts: edgeLine(i0, len, sg, 0.5 + (cols - 1) * 0.31) });
+      markC(cov[sg > 0 ? 1 : 0], i0, len, 1);
+    }
+    const spans = [[], []];
+    for (const m of uniq) { const sd = m.side === 'R' ? 1 : 0, mi = idx(m.index), half = m.width / 2 + 3.2, i0 = mi - half / ds, len = 2 * half / ds, a = spans[sd], l = a[a.length - 1]; if (cov[sd][mi] === 1) continue; if (l && i0 <= l[0] + l[1] + 2) l[1] = Math.max(l[1], i0 + len - l[0]); else a.push([i0, len]); }
+    for (let sd = 0; sd < 2; sd++) for (const [i0, len] of spans[sd]) { barriers.push({ kind: 'jersey', side: sd ? 'R' : 'L', h: 0.8, w: 0.6, pts: edgeLine(i0, len, sd ? 1 : -1, 0.85) }); markC(cov[sd], i0, len, 4); }
+    for (let sd = 0; sd < 2; sd++) {
+      const arr = cov[sd]; let start = arr.findIndex(v => v !== 0); if (start < 0) continue;
+      for (let q = 0; q < n;) {
+        if (arr[mod(start + q, n)] !== 0) { q++; continue; }
+        let r = q; while (r < n && arr[mod(start + r, n)] === 0) r++;
+        if ((r - q) * ds >= 18) { const a0 = start + q + 4 / ds, a1 = start + r - 4 / ds; if (a1 - a0 > 6) barriers.push({ kind: 'guardrail', side: sd ? 'R' : 'L', h: 0.9, w: 0.2, pts: edgeLine(a0, a1 - a0, sd ? 1 : -1, 0.62) }); }
+        q = r;
+      }
+    }
+  }
   const outPts = []; for (let i = 0; i < n; i++) outPts.push(r2(pts[i].x), r2(ptY[i]), r2(pts[i].z));
   const rbRanges = []; { let s = -1; for (let i = 0; i < n; i++) { if (pts[i].rb && s < 0) s = i; if ((!pts[i].rb || i === n - 1) && s >= 0) { if (i - s > 12) rbRanges.push([s, i - 1]); s = -1; } } }
   return {
@@ -537,7 +564,8 @@ function finalise(ch, id, name, nameHy, kind) {
     corners: corners.map(c => ({ ...c, ...(() => { const p = pts[c.apex]; return { x: r2(p.x), y: r2(ptY[c.apex]), z: r2(p.z) }; })() })),
     apexes: corners.map(c => c.apex), straights, roundabouts: rbRanges,
     junctions: uniq.map(u => ({ ...u, index: idx(u.index) })).sort((a, b) => a.index - b.index),
-    pit, stands, spawns, keepout,
+    pit, stands, spawns, keepout, barriers,
+    start: { x: r2(pts[0].x), y: r2(ptY[0] + 0.15), z: r2(pts[0].z), heading: r2(hdr[0]) },
     clearance: { left: clrL, right: clrR },
     stats: { corners: corners.length, hairpins: m.hairpins, longestStraight: Math.round(m.longest), straightPct: Math.round(m.straightFrac * 100), elevationRange: r2(m.range), maxGradePct: r2(m.maxG * 100), minR: r2(m.minR), avgWidth: r2(m.avgW), gain: Math.round(m.gain), pitSideRoom: best.room },
     bounds: { minX: r2(Math.min(...pts.map(p => p.x))), maxX: r2(Math.max(...pts.map(p => p.x))), minZ: r2(Math.min(...pts.map(p => p.z))), maxZ: r2(Math.max(...pts.map(p => p.z))) },

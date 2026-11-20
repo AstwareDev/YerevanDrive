@@ -539,8 +539,8 @@
  },
  "roadfield": {
   "file": "roadfield.png",
-  "extent": 1100,
-  "size": 2048,
+  "extent": 2304,
+  "size": 4096,
   "note": "RG=cos/sin(2*dir) B=lateral 0..1 A=halfwidth/16m"
  }
 }

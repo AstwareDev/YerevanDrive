@@ -4,7 +4,8 @@ import { quality } from './quality.js';
 import { pbr, slot, loadPBR } from './pbr.js';
 
 export const wetness = { value: 1.0 };   // 0 = dry, 1 = rain-soaked
-const EXT = 1100;                        // terrain/aerial extent half-size (m); must match tools/fetch-imagery.mjs and tools/build-textures.mjs (road field)
+const NEAR = { cx: -768, cz: -1280, half: 2304 };   // near-field window (aerial / AO / road field), must match tools/config.mjs NEAR
+const EXT = NEAR.half;                        // terrain/aerial extent half-size (m); must match tools/fetch-imagery.mjs and tools/build-textures.mjs (road field)
 const FULL = quality.level !== 'low';    // low: one albedo+normal+ORM fetch per surface, no road decals / second asphalt scale / manholes
 
 // Shared uniforms (aerial photo + baked building-contact AO, both in world XZ, north-up)
@@ -57,7 +58,7 @@ function groundFrag(kind, c) {
   const tint = f1(c.tint ?? 1);
   const aoK = f1(c.ormAO ?? 0.6);
   const head = `
-        vec2 wuv = vec2((vWP.x + ${EXT}.0) / ${EXT * 2}.0, 1.0 - (vWP.z + ${EXT}.0) / ${EXT * 2}.0);
+        vec2 wuv = vec2((vWP.x + ${NEAR.half - NEAR.cx}.0) / ${NEAR.half * 2}.0, 1.0 - (vWP.z + ${NEAR.half - NEAR.cz}.0) / ${NEAR.half * 2}.0);
         float pdist = length(vViewPosition);
         float wetm = 0.0;
         ${needPud ? 'float pud = texture2D(uPud, vWP.xz * 0.0075).r * 0.55 + texture2D(uPud, vWP.xz * 0.031 + 0.37).r * 0.45;' : 'float pud = 0.5;'}
@@ -140,7 +141,7 @@ function groundFrag(kind, c) {
               vec3 h3 = fract(vec3(cell.xyx) * vec3(0.1031, 0.1030, 0.0973)); h3 += dot(h3, h3.yzx + 33.33); vec2 hh = fract((h3.xx + h3.yz) * h3.zy);
               vec2 cc = (cell + 0.12 + 0.76 * hh) * 24.0, dd = vWP.xz - cc;
               if (dot(dd, dd) < 0.6) {
-                vec4 rc = textureLod(uRF, vec2((cc.x + ${EXT}.0) / ${EXT * 2}.0, 1.0 - (cc.y + ${EXT}.0) / ${EXT * 2}.0), 0.0);
+                vec4 rc = textureLod(uRF, vec2((cc.x + ${NEAR.half - NEAR.cx}.0) / ${NEAR.half * 2}.0, 1.0 - (cc.y + ${NEAR.half - NEAR.cz}.0) / ${NEAR.half * 2}.0), 0.0);
                 if (rc.a > 0.06 && abs(rc.b - 0.5) < 0.24) {
                   vec2 d2 = pbrDir(rc.rg * 2.0 - 1.0), p2 = vec2(-d2.y, d2.x);
                   vec2 muv = vec2(dot(dd, d2), dot(dd, p2)) / ${f1(c.manholeSize ?? 1.0)} + 0.5;

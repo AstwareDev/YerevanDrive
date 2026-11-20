@@ -5,7 +5,7 @@ import earcut from 'earcut';
 import sharp from 'sharp';
 import { pavement, polysOf as clipPolys, clipToRect } from './lib/pave.mjs';
 import { writeGlb } from './lib/glb.mjs';
-import { CENTER, HALF, project } from './config.mjs';
+import { CENTER, HALF, REGION, NEAR, inRegion, project } from './config.mjs';
 
 const osm = JSON.parse(fs.readFileSync('data/osm.json', 'utf8'));
 const hm = JSON.parse(fs.readFileSync('data/height.json', 'utf8'));
@@ -28,10 +28,11 @@ const signedArea = r => { let s = 0; for (let i = 0; i < r.length; i++) { const 
 function pip(p, ring) { let inside = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const a = ring[i], b = ring[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside; } return inside; }
 const num = v => { if (v == null) return null; const m = String(v).match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : null; };
 const pts = geom => geom.map(g => project(g.lat, g.lon));
-const inMap = (x, z, m = 0) => Math.abs(x) <= HALF + m && Math.abs(z) <= HALF + m;
+const inMap = (x, z, m = 0) => inRegion(x, z, m);     // extended free-drive region (tools/config.mjs)
 
 // ------------------------------------------------------------------ mesh builders (chunked by cell)
-const EXT = 1100, CELL = 256, T0 = 4;   // EXT: data/aerial extent; level-0 tiles cover tile indices -4..3 (+-1024 m)
+const CELL = 256, TI0 = REGION.x0 / CELL, TI1 = REGION.x1 / CELL, TJ0 = REGION.z0 / CELL, TJ1 = REGION.z1 / CELL;   // level-0 tile index ranges (region is tile aligned)
+const OX0 = NEAR.cx - NEAR.half, OZ0 = NEAR.cz - NEAR.half;      // origin of the near-field window (occupancy / AO / surface rasters share it with the aerial + road-field textures)
 const cellIdx = v => Math.floor(v / CELL);
 class Builder {
   constructor() { this.pos = []; this.nor = []; this.uv = []; this.col = []; this.idx = []; this.n = 0; }
@@ -62,23 +63,23 @@ function quad(b, A, Bp, C, D, n, uA, uB, uC, uD, c) {
 }
 
 // ------------------------------------------------------------------ occupancy raster (buildings / roads) 2 m cells
-const OC = 2, ON = Math.round(2 * EXT / OC);
+const OC = 2, ON = Math.round(2 * NEAR.half / OC);
 const occB = new Uint8Array(ON * ON), occR = new Uint8Array(ON * ON);
 function fillPoly(ring, arr) {
   let zmin = Infinity, zmax = -Infinity; for (const p of ring) { zmin = Math.min(zmin, p[1]); zmax = Math.max(zmax, p[1]); }
-  const j0 = Math.max(0, Math.floor((zmin + EXT) / OC)), j1 = Math.min(ON - 1, Math.ceil((zmax + EXT) / OC));
+  const j0 = Math.max(0, Math.floor((zmin - OZ0) / OC)), j1 = Math.min(ON - 1, Math.ceil((zmax - OZ0) / OC));
   for (let j = j0; j <= j1; j++) {
-    const z = j * OC - EXT + OC / 2, xs = [];
+    const z = j * OC + OZ0 + OC / 2, xs = [];
     for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; if ((a[1] > z) !== (b[1] > z)) xs.push(a[0] + (z - a[1]) / (b[1] - a[1]) * (b[0] - a[0])); }
     xs.sort((p, q) => p - q);
-    for (let k = 0; k + 1 < xs.length; k += 2) { const i0 = Math.max(0, Math.floor((xs[k] + EXT) / OC)), i1 = Math.min(ON - 1, Math.floor((xs[k + 1] + EXT) / OC)); for (let i = i0; i <= i1; i++) arr[j * ON + i] = 1; }
+    for (let k = 0; k + 1 < xs.length; k += 2) { const i0 = Math.max(0, Math.floor((xs[k] - OX0) / OC)), i1 = Math.min(ON - 1, Math.floor((xs[k + 1] - OX0) / OC)); for (let i = i0; i <= i1; i++) arr[j * ON + i] = 1; }
   }
 }
 function stamp(arr, x, z, r) {
-  const i0 = Math.floor((x - r + EXT) / OC), i1 = Math.floor((x + r + EXT) / OC), j0 = Math.floor((z - r + EXT) / OC), j1 = Math.floor((z + r + EXT) / OC);
-  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (i >= 0 && j >= 0 && i < ON && j < ON) { const cx = i * OC - EXT + OC / 2 - x, cz = j * OC - EXT + OC / 2 - z; if (cx * cx + cz * cz <= r * r) arr[j * ON + i] = 1; }
+  const i0 = Math.floor((x - r - OX0) / OC), i1 = Math.floor((x + r - OX0) / OC), j0 = Math.floor((z - r - OZ0) / OC), j1 = Math.floor((z + r - OZ0) / OC);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (i >= 0 && j >= 0 && i < ON && j < ON) { const cx = i * OC + OX0 + OC / 2 - x, cz = j * OC + OZ0 + OC / 2 - z; if (cx * cx + cz * cz <= r * r) arr[j * ON + i] = 1; }
 }
-const occAt = (arr, x, z) => { const i = Math.floor((x + EXT) / OC), j = Math.floor((z + EXT) / OC); return i >= 0 && j >= 0 && i < ON && j < ON && arr[j * ON + i] === 1; };
+const occAt = (arr, x, z) => { const i = Math.floor((x - OX0) / OC), j = Math.floor((z - OZ0) / OC); return i >= 0 && j >= 0 && i < ON && j < ON && arr[j * ON + i] === 1; };
 
 // ------------------------------------------------------------------ ring assembly for multipolygon relations
 function assembleRings(segs) {
@@ -120,6 +121,7 @@ const polysOf = e => {
   return [];
 };
 
+const collB = [], collW = [];   // physics colliders: building footprints [flat ring, y0, y1], walls/fences [flat line, h]
 const buildingsRaw = [], parts = [], vroads = [], pedWays = [], crossings = [], areas = [], waterLines = [], barriers = [];
 const trees = [], lampNodes = [], signals = [], fountains = [];
 for (const e of elements) {
@@ -163,7 +165,7 @@ for (const e of elements) {
 console.log({ buildings: buildingsRaw.length, parts: parts.length, roads: vroads.length, ped: pedWays.length, crossings: crossings.length, areas: areas.length, barriers: barriers.length, trees: trees.length, lampNodes: lampNodes.length, signals: signals.length });
 
 // ------------------------------------------------------------------ terrain (per level-0 tile, aligned with the far LOD tiles)
-for (let tj = -T0; tj < T0; tj++) for (let ti = -T0; ti < T0; ti++) {
+for (let tj = TJ0; tj < TJ1; tj++) for (let ti = TI0; ti < TI1; ti++) {
   const n = 48, st = CELL / n, x0 = ti * CELL, z0 = tj * CELL, tb = B('terrain', x0 + CELL / 2, z0 + CELL / 2), base0 = tb.n;
   for (let c = 0; c <= n; c++) for (let aa = 0; aa <= n; aa++) {
     const x = x0 + aa * st, z = z0 + c * st, y = H(x, z);
@@ -332,19 +334,19 @@ const SW_UP = 0.26, ROAD_Y = 0.10;
 {
   const pav = pavement({ roads: roadShapes, buildings: buildingsRaw.map(b => b.outer), closeR: 2.5 });
   // 0.5 m raster of the road surface (even-odd over every ring) to classify curb edges
-  const RC = 0.5, RN = Math.round(2 * EXT / RC), roadMask = new Uint8Array(RN * RN);
+  const RC = 0.5, RN = Math.round(2 * NEAR.half / RC), roadMask = new Uint8Array(RN * RN);
   for (const P of clipPolys(pav.road)) {
     const rings = [P.outer, ...P.holes]; let zmin = Infinity, zmax = -Infinity; for (const q of P.outer) { zmin = Math.min(zmin, q[1]); zmax = Math.max(zmax, q[1]); }
     const edges = []; for (const r of rings) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; if (a[1] !== b[1]) edges.push(a[1] < b[1] ? [a[0], a[1], b[0], b[1]] : [b[0], b[1], a[0], a[1]]); }
-    for (let j = Math.max(0, Math.floor((zmin + EXT) / RC)); j <= Math.min(RN - 1, Math.floor((zmax + EXT) / RC)); j++) {
-      const z = j * RC - EXT + RC / 2, xs = []; for (const e of edges) if (e[1] <= z && e[3] > z) xs.push(e[0] + (z - e[1]) / (e[3] - e[1]) * (e[2] - e[0])); xs.sort((p, q) => p - q);
-      for (let k = 0; k + 1 < xs.length; k += 2) for (let i = Math.max(0, Math.floor((xs[k] + EXT) / RC)); i <= Math.min(RN - 1, Math.floor((xs[k + 1] + EXT) / RC)); i++) roadMask[j * RN + i] = 1;
+    for (let j = Math.max(0, Math.floor((zmin - OZ0) / RC)); j <= Math.min(RN - 1, Math.floor((zmax - OZ0) / RC)); j++) {
+      const z = j * RC + OZ0 + RC / 2, xs = []; for (const e of edges) if (e[1] <= z && e[3] > z) xs.push(e[0] + (z - e[1]) / (e[3] - e[1]) * (e[2] - e[0])); xs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < xs.length; k += 2) for (let i = Math.max(0, Math.floor((xs[k] - OX0) / RC)); i <= Math.min(RN - 1, Math.floor((xs[k + 1] - OX0) / RC)); i++) roadMask[j * RN + i] = 1;
     }
   }
-  const onRoad = (x, z) => { const i = Math.floor((x + EXT) / RC), j = Math.floor((z + EXT) / RC); return i >= 0 && j >= 0 && i < RN && j < RN && roadMask[j * RN + i] === 1; };
+  const onRoad = (x, z) => { const i = Math.floor((x - OX0) / RC), j = Math.floor((z - OZ0) / RC); return i >= 0 && j >= 0 && i < RN && j < RN && roadMask[j * RN + i] === 1; };
   // surfaces, clipped per level-0 tile so they stay aligned with the tile grid
   let nRoad = 0, nWalk = 0;
-  for (let tj = -T0; tj < T0; tj++) for (let ti = -T0; ti < T0; ti++) {
+  for (let tj = TJ0; tj < TJ1; tj++) for (let ti = TI0; ti < TI1; ti++) {
     const rect = [ti * CELL, tj * CELL, (ti + 1) * CELL, (tj + 1) * CELL];
     for (const P of clipToRect(pav.road, rect)) { addArea('asphalt', P.outer, P.holes, ROAD_Y, { maxEdge: 9 }); nRoad++; }
     for (const P of clipToRect(pav.sidewalk, rect)) { addArea('pavement', P.outer, P.holes, SW_UP, { maxEdge: 9 }); nWalk++; }
@@ -365,6 +367,30 @@ const SW_UP = 0.26, ROAD_Y = 0.10;
         quad(bl, [ax, ha + yb0, az], [bx, hb + yb0, bz], [bx, hb + SW_UP, bz], [ax, ha + SW_UP, az], [nx, 0, nz], [u, 0], [u + du, 0], [u + du, hh], [u, hh], [255, 255, 255, 255]); u += du; nCurb++;
       }
     }
+  }
+
+  // ---- ground-offset raster for the physics (centimetres above the terrain, 0.5 m cells): grass/plaza/lot < asphalt 10 < sidewalk 26
+  {
+    const off = new Uint8Array(RN * RN).fill(4);
+    const fillRings = (P, val) => {
+      const rings = [P.outer, ...P.holes]; let zmin = Infinity, zmax = -Infinity; for (const q of P.outer) { zmin = Math.min(zmin, q[1]); zmax = Math.max(zmax, q[1]); }
+      const edges = []; for (const r of rings) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; if (a[1] !== b[1]) edges.push(a[1] < b[1] ? [a[0], a[1], b[0], b[1]] : [b[0], b[1], a[0], a[1]]); }
+      for (let j = Math.max(0, Math.floor((zmin - OZ0) / RC)); j <= Math.min(RN - 1, Math.floor((zmax - OZ0) / RC)); j++) {
+        const z = j * RC + OZ0 + RC / 2, xs = []; for (const e of edges) if (e[1] <= z && e[3] > z) xs.push(e[0] + (z - e[1]) / (e[3] - e[1]) * (e[2] - e[0])); xs.sort((p, q) => p - q);
+        for (let k = 0; k + 1 < xs.length; k += 2) for (let i = Math.max(0, Math.floor((xs[k] - OX0) / RC)); i <= Math.min(RN - 1, Math.floor((xs[k + 1] - OX0) / RC)); i++) off[j * RN + i] = val;
+      }
+    };
+    for (const a of areas) fillRings({ outer: a.outer, holes: a.holes }, { grass: 4, plaza: 5, lot: 9, dirt: 3, water: 4 }[a.kind] ?? 4);
+    for (const P of clipPolys(pav.road)) fillRings(P, 10);
+    for (const P of clipPolys(pav.sidewalk)) fillRings(P, 26);
+    // crop to the drivable region (+48 m): the near-field window is a bit bigger than the region
+    const cx0 = Math.max(0, Math.floor((REGION.x0 - 48 - OX0) / RC)), cx1 = Math.min(RN, Math.ceil((REGION.x1 + 48 - OX0) / RC)), cz0 = Math.max(0, Math.floor((REGION.z0 - 48 - OZ0) / RC)), cz1 = Math.min(RN, Math.ceil((REGION.z1 + 48 - OZ0) / RC));
+    const cw = cx1 - cx0, ch = cz1 - cz0, crop = Buffer.alloc(cw * ch);
+    for (let j = 0; j < ch; j++) crop.set(off.subarray((cz0 + j) * RN + cx0, (cz0 + j) * RN + cx1), j * cw);
+    const zlib = await import('node:zlib');
+    fs.writeFileSync('public/map/surface.bin', zlib.deflateSync(crop, { level: 9 }));
+    fs.writeFileSync('public/map/surface.json', JSON.stringify({ w: cw, h: ch, cell: RC, x0: OX0 + cx0 * RC, z0: OZ0 + cz0 * RC }));
+    console.log('surface raster', cw, 'x', ch, (fs.statSync('public/map/surface.bin').size / 1e3).toFixed(0), 'KB');
   }
   console.log('pavement: road polys', nRoad, 'sidewalk polys', nWalk, 'curb faces', nCurb);
 }
@@ -432,7 +458,7 @@ const STYLE = {
 // real aerial photo -> roof colour / roof-type hints
 let aer = null;
 if (fs.existsSync('public/map/aerial.webp')) { const { data, info } = await sharp('public/map/aerial.webp').removeAlpha().raw().toBuffer({ resolveWithObject: true }); aer = { data, w: info.width, h: info.height }; }
-const aerAt = (x, z) => { if (!aer) return [90, 90, 95]; const px = Math.min(aer.w - 1, Math.max(0, Math.floor((x + EXT) / (2 * EXT) * aer.w))), py = Math.min(aer.h - 1, Math.max(0, Math.floor((z + EXT) / (2 * EXT) * aer.h))), i = (py * aer.w + px) * 3; return [aer.data[i], aer.data[i + 1], aer.data[i + 2]]; };
+const aerAt = (x, z) => { if (!aer) return [90, 90, 95]; const px = Math.min(aer.w - 1, Math.max(0, Math.floor((x - OX0) / (2 * NEAR.half) * aer.w))), py = Math.min(aer.h - 1, Math.max(0, Math.floor((z - OZ0) / (2 * NEAR.half) * aer.h))), i = (py * aer.w + px) * 3; return [aer.data[i], aer.data[i + 1], aer.data[i + 2]]; };
 function roofSample(outer, rng) {
   let minx = Infinity, maxx = -Infinity, minz = Infinity, maxz = -Infinity; for (const p of outer) { minx = Math.min(minx, p[0]); maxx = Math.max(maxx, p[0]); minz = Math.min(minz, p[1]); maxz = Math.max(maxz, p[1]); }
   const acc = [0, 0, 0]; let n = 0;
@@ -471,6 +497,7 @@ function addBuilding(bd, isPart) {
   levels = Math.max(1, Math.round(height / 3.3));
   const minH = num(t.min_height) ?? (num(t['building:min_level']) ? num(t['building:min_level']) * 3.2 : 0);
   const top = minG + height;
+  if (!isPart) collB.push({ r: outer.flatMap(p => [+p[0].toFixed(2), +p[1].toFixed(2)]), a: +(minG - 1.5).toFixed(2), b: +top.toFixed(2) });
   const startYear = num(t.start_date);
   const special = (t.name || '').match(/կառավարություն|Կառավարական|գրասենյակ|պատկերասրահ|թանգարան|թատրոն|Post|Marriott|Government|museum|Museum|Gallery|Bank|Բանկ/);
   // roof colour from the photo -> pitched (red tile) detection
@@ -622,6 +649,7 @@ const isSkipped = b => { if (skipIds.has(b.id)) return true; const c = b.outer.r
 const partInside = bd => partCentroids.some(c => pip(c, bd.outer));
 for (const b of buildingsRaw) if (!isSkipped(b) && !partInside(b)) addBuilding(b, false);
 for (const p of parts) if (!isSkipped(p)) addBuilding({ ...p, id: p.id + 77 }, true);
+for (const b of buildingsRaw) if (isSkipped(b) && b.outer.length >= 3 && b.outer.some(p => inMap(p[0], p[1], 20))) { let g = Infinity; for (const p of b.outer) g = Math.min(g, H(p[0], p[1])); collB.push({ r: b.outer.flatMap(p => [+p[0].toFixed(2), +p[1].toFixed(2)]), a: +(g - 1.5).toFixed(2), b: +(g + 16).toFixed(2) }); }
 console.log('buildings built', bCount, 'neon signs', neonCount, 'hipped roofs', hipCount, styleCount);
 
 // baked contact-AO (building proximity), north-up, same extent as aerial.webp
@@ -634,6 +662,7 @@ for (const bw of barriers) {
   if (!bw.line.some(p => inMap(p[0], p[1], 20))) continue;
   const t = bw.t, hh = t.barrier === 'fence' ? 1.5 : t.barrier === 'retaining_wall' ? 1.2 : 2.0, th = 0.25;
   const line = resample(bw.line, 5), mat = t.barrier === 'fence' ? 'fence' : 'wall';
+  collW.push({ l: line.flatMap(p => [+p[0].toFixed(2), +p[1].toFixed(2)]), h: hh });
   for (let i = 1; i < line.length; i++) {
     const a = line[i - 1], b = line[i], l = dist(a, b); if (l < 0.2) continue;
     const dx = (b[0] - a[0]) / l, dz = (b[1] - a[1]) / l, nx = -dz, nz = dx;
@@ -657,7 +686,7 @@ for (const [x, z] of trees) {
 // ------------------------------------------------------------------ level-0 tiles (public/tiles/0/<i>_<j>.glb)
 fs.mkdirSync('public/map', { recursive: true });
 let tris = 0, verts = 0, bytes = 0; const m0 = [], byTile = new Map();
-for (const b of builders.values()) { if (!b.idx.length || b.ci < -T0 || b.ci >= T0 || b.cj < -T0 || b.cj >= T0) continue; const k = `${b.ci}_${b.cj}`; (byTile.get(k) ?? byTile.set(k, []).get(k)).push(b); tris += b.idx.length / 3; verts += b.n; }
+for (const b of builders.values()) { if (!b.idx.length || b.ci < TI0 || b.ci >= TI1 || b.cj < TJ0 || b.cj >= TJ1) continue; const k = `${b.ci}_${b.cj}`; (byTile.get(k) ?? byTile.set(k, []).get(k)).push(b); tris += b.idx.length / 3; verts += b.n; }
 fs.rmSync('public/tiles/0', { recursive: true, force: true });
 for (const [k, bs] of byTile) {
   const [ci, cj] = k.split('_').map(Number); let mn = Infinity, mx = -Infinity;
@@ -670,10 +699,35 @@ fs.copyFileSync('data/height.bin', 'public/map/height.bin');
 fs.writeFileSync('public/map/height.json', JSON.stringify({ N, STEP, R, base }));
 const lampFlat = []; for (const l of lamps) lampFlat.push(+l[0].toFixed(2), +l[1].toFixed(2), +l[2].toFixed(2), +l[3].toFixed(3), +l[4].toFixed(3), l[5]);
 const fountainFlat = fountains.filter(f => inMap(f[0], f[1])).flatMap(f => [+f[0].toFixed(2), +H(f[0], f[1]).toFixed(2), +f[1].toFixed(2)]);
+// ------------------------------------------------------------------ named streets for the in-game teleport (J key): a point on the longest matching road inside the region
+const PLACE_DEFS = [['Marshal Baghramyan Ave', /Baghramyan|Bagramyan|Բաղրամյան/i], ['Orbeli Brothers St', /Orbeli|Օրբելի/i], ['Barekamutyun', /Barekamutyun|Bareqamutyun|Բարեկամության/i], ['Komitas Ave', /Komitas|Կոմիտաս/i], ['Barekamutyun Metro', null, -1585, -2062]];      // Barekamutyun is only a metro station / bus stops in OSM: snap to the nearest road
+const places = [];
+for (const [label, re, fx, fz] of PLACE_DEFS) {
+  let best = null;
+  if (!re) {      // fixed coordinates -> nearest drivable road vertex
+    let bd = 1e9;
+    for (const e of elements) { if (e.type !== 'way' || !e.geometry || !/^(trunk|primary|secondary|tertiary|residential|unclassified)$/.test(e.tags?.highway ?? '')) continue; const line = pts(e.geometry); for (let i = 1; i < line.length - 1; i++) { const d = Math.hypot(line[i][0] - fx, line[i][1] - fz); if (d < bd) { bd = d; best = { len: 1, line, k: i }; } } }
+  }
+  else for (const e of elements) {
+    if (e.type !== 'way' || !e.geometry || !e.tags?.highway || !/^(trunk|primary|secondary|tertiary|residential|unclassified|living_street)$/.test(e.tags.highway)) continue;
+    if (!re.test((e.tags['name:en'] ?? '') + ' ' + (e.tags.name ?? ''))) continue;
+    const line = pts(e.geometry).filter(p => inMap(p[0], p[1], -60)); if (line.length < 3) continue;
+    let len = 0; for (let i = 1; i < line.length; i++) len += dist(line[i - 1], line[i]);
+    if (!best || len > best.len) best = { len, line };
+  }
+  if (!best) { console.warn('place not found:', label); continue; }
+  const k = best.k ?? Math.floor(best.line.length / 2), a = best.line[k - 1], b = best.line[k + 1] ?? best.line[k];
+  places.push({ name: label, x: +best.line[k][0].toFixed(1), z: +best.line[k][1].toFixed(1), heading: +Math.atan2(b[0] - a[0], b[1] - a[1]).toFixed(3) });
+}
+console.log('places', places);
+
 fs.writeFileSync('public/map/meta.json', JSON.stringify({
-  center: CENTER, half: HALF, base, cell: CELL, extent: EXT, tile0: CELL,
+  places,
+  center: CENTER, half: HALF, base, cell: CELL, extent: NEAR.half, near: NEAR, region: REGION, tile0: CELL,
   trees: treeOut, lamps: lampFlat, fountains: fountainFlat,
   neon: neonMeta, tours,
   signals: signals.filter(s => inMap(s[0], s[1])).flatMap(s => [+s[0].toFixed(2), +H(s[0], s[1]).toFixed(2), +s[1].toFixed(2)]),
 }));
+fs.writeFileSync('public/map/colliders.json', JSON.stringify({ buildings: collB, walls: collW }));
+console.log(`colliders: ${collB.length} buildings, ${collW.length} walls`);
 console.log(`L0 tiles: ${verts} verts, ${tris} tris, ${cells.size} tiles, ${(bytes / 1e6).toFixed(1)} MB; trees ${treeOut.length / 4}, lamps ${lamps.length}`);

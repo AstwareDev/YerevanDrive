@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import sharp from 'sharp';
 import { CENTER } from './config.mjs';
-const [ARG_Z, ARG_EXT, ARG_FILE] = process.argv.slice(2);
+const [ARG_Z, ARG_EXT, ARG_FILE, ARG_CX, ARG_CZ] = process.argv.slice(2);   // optional window centre offset in local metres (x east, z south)
 const Z = +(ARG_Z ?? 18), EXT = +(ARG_EXT ?? 1100), OUT = 4096, TILE = 256, FILE = ARG_FILE ?? 'public/map/aerial.webp';
 const TILE_URL = (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
 const n = 2 ** Z;
@@ -11,7 +11,7 @@ const fx = lon => (lon + 180) / 360 * n;
 const fy = lat => (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n;
 const mPerPx = 156543.03392 * Math.cos(CENTER.lat * Math.PI / 180) / n / (256 / 256) / 1; // metres per pixel at this latitude
 const mpp = 40075016.686 * Math.cos(CENTER.lat * Math.PI / 180) / (n * TILE);
-const cx = fx(CENTER.lon) * TILE, cy = fy(CENTER.lat) * TILE;           // centre in mosaic pixels (global)
+const cx = fx(CENTER.lon) * TILE + (+(ARG_CX ?? 0)) / mpp, cy = fy(CENTER.lat) * TILE + (+(ARG_CZ ?? 0)) / mpp;           // centre in mosaic pixels (global)
 const half = EXT / mpp;                                                  // half-size in source pixels
 const x0 = Math.floor((cx - half) / TILE), x1 = Math.floor((cx + half) / TILE), y0 = Math.floor((cy - half) / TILE), y1 = Math.floor((cy + half) / TILE);
 const W = (x1 - x0 + 1) * TILE, Hh = (y1 - y0 + 1) * TILE;

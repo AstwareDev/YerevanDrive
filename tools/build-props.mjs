@@ -4,7 +4,7 @@
 // Local frame: x east, y up (0 = Republic Square ground), z south.
 import fs from 'node:fs';
 import sharp from 'sharp';
-import { HALF, project } from './config.mjs';
+import { HALF, inRegion, project } from './config.mjs';
 import { H, hash, mkRng } from './terrain.mjs';
 import { SPECS, MODELS, MODEL_WEIGHT } from '../src/props/carspecs.js';
 
@@ -14,13 +14,13 @@ const meta = JSON.parse(fs.readFileSync('public/map/meta.json', 'utf8'));
 const skipFile = fs.existsSync('data/landmark-skip.json') ? JSON.parse(fs.readFileSync('data/landmark-skip.json', 'utf8')) : { ids: [], circles: [] };
 
 // ------------------------------------------------------------------ helpers
-const EXT = 1100, OC = 2, ON = Math.round(2 * EXT / OC);
+const OXa = -3072, OZa = -3584, SZ = 4608, OC = 2, ON = Math.round(SZ / OC);     // near-field window (tools/config.mjs NEAR): aerial, occupancy rasters
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const signedArea = r => { let s = 0; for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; };
 function pip(p, ring) { let inside = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const a = ring[i], b = ring[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside; } return inside; }
 const num = v => { if (v == null) return null; const m = String(v).match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : null; };
 const pts = geom => geom.map(g => project(g.lat, g.lon));
-const inMap = (x, z, m = 0) => Math.abs(x) <= HALF + m && Math.abs(z) <= HALF + m;
+const inMap = (x, z, m = 0) => inRegion(x, z, m);
 const r2 = v => +v.toFixed(2);
 const centroid = ring => { const c = ring.reduce((s, q) => [s[0] + q[0], s[1] + q[1]], [0, 0]); return [c[0] / ring.length, c[1] / ring.length]; };
 function resample(line, step) {
@@ -35,22 +35,22 @@ function resample(line, step) {
 // ------------------------------------------------------------------ rasters
 const mk = () => new Uint8Array(ON * ON);
 const occB = mk(), occR = mk(), occW = mk(), kind = mk(); // buildings, asphalt, water, area kind (1 grass 2 plaza 3 lot 4 dirt)
-const ci = v => Math.floor((v + EXT) / OC);
+const cix = v => Math.floor((v - OXa) / OC), ciz = v => Math.floor((v - OZa) / OC);
 function fillPoly(ring, arr, val = 1) {
   let zmin = Infinity, zmax = -Infinity; for (const p of ring) { zmin = Math.min(zmin, p[1]); zmax = Math.max(zmax, p[1]); }
-  const j0 = Math.max(0, ci(zmin)), j1 = Math.min(ON - 1, ci(zmax));
+  const j0 = Math.max(0, ciz(zmin)), j1 = Math.min(ON - 1, ciz(zmax));
   for (let j = j0; j <= j1; j++) {
-    const z = j * OC - EXT + OC / 2, xs = [];
+    const z = j * OC + OZa + OC / 2, xs = [];
     for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; if ((a[1] > z) !== (b[1] > z)) xs.push(a[0] + (z - a[1]) / (b[1] - a[1]) * (b[0] - a[0])); }
     xs.sort((p, q) => p - q);
-    for (let k = 0; k + 1 < xs.length; k += 2) { const i0 = Math.max(0, ci(xs[k])), i1 = Math.min(ON - 1, ci(xs[k + 1])); for (let i = i0; i <= i1; i++) arr[j * ON + i] = val; }
+    for (let k = 0; k + 1 < xs.length; k += 2) { const i0 = Math.max(0, cix(xs[k])), i1 = Math.min(ON - 1, cix(xs[k + 1])); for (let i = i0; i <= i1; i++) arr[j * ON + i] = val; }
   }
 }
 function stamp(arr, x, z, r, val = 1) {
-  const i0 = ci(x - r), i1 = ci(x + r), j0 = ci(z - r), j1 = ci(z + r);
-  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (i >= 0 && j >= 0 && i < ON && j < ON) { const cx = i * OC - EXT + OC / 2 - x, cz = j * OC - EXT + OC / 2 - z; if (cx * cx + cz * cz <= r * r) arr[j * ON + i] = val; }
+  const i0 = cix(x - r), i1 = cix(x + r), j0 = ciz(z - r), j1 = ciz(z + r);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (i >= 0 && j >= 0 && i < ON && j < ON) { const cx = i * OC + OXa + OC / 2 - x, cz = j * OC + OZa + OC / 2 - z; if (cx * cx + cz * cz <= r * r) arr[j * ON + i] = val; }
 }
-const at = (arr, x, z) => { const i = ci(x), j = ci(z); return i >= 0 && j >= 0 && i < ON && j < ON ? arr[j * ON + i] : 0; };
+const at = (arr, x, z) => { const i = cix(x), j = ciz(z); return i >= 0 && j >= 0 && i < ON && j < ON ? arr[j * ON + i] : 0; };
 
 // ------------------------------------------------------------------ OSM classification (mirrors tools/build-map.mjs)
 function assembleRings(segs) {
@@ -182,11 +182,11 @@ function crossedByOther(x, z, rd, pad) {
 // ------------------------------------------------------------------ aerial imagery
 console.log('reading aerial…');
 const AER = await sharp('public/map/aerial.webp').raw().toBuffer({ resolveWithObject: true });
-const AW = AER.info.width, aer = AER.data, AS = AW / 2200; // px per metre
-const apx = (x, z) => { const px = Math.round((x + 1100) * AS), py = Math.round((z + 1100) * AS); return (px < 0 || py < 0 || px >= AW || py >= AW) ? -1 : (py * AW + px) * 3; };
+const AW = AER.info.width, aer = AER.data, AS = AW / SZ; // px per metre
+const apx = (x, z) => { const px = Math.round((x - OXa) * AS), py = Math.round((z - OZa) * AS); return (px < 0 || py < 0 || px >= AW || py >= AW) ? -1 : (py * AW + px) * 3; };
 const lumAt = (x, z) => { const i = apx(x, z); return i < 0 ? 0 : 0.3 * aer[i] + 0.59 * aer[i + 1] + 0.11 * aer[i + 2]; };
 // vegetation / canopy masks on a 2x2 downsampled grid (~1.07 m cells)
-const GN = AW / 2, GS = 2200 / GN;
+const GN = AW / 2, GS = SZ / GN;
 const canopy = new Uint8Array(GN * GN);
 {
   const lum = new Float32Array(AW * AW), veg = new Uint8Array(AW * AW);
@@ -197,8 +197,8 @@ const canopy = new Uint8Array(GN * GN);
     if (cnt >= 3 && (rough / cnt > 9 || lum[(gy * 2) * AW + gx * 2] < 75)) canopy[gy * GN + gx] = 1;
   }
 }
-const gx = v => Math.floor((v + 1100) / GS);
-const canopyAt = (x, z) => { const i = gx(x), j = gx(z); return i >= 0 && j >= 0 && i < GN && j < GN && canopy[j * GN + i] === 1; };
+const gxX = v => Math.floor((v - OXa) / GS), gxZ = v => Math.floor((v - OZa) / GS);
+const canopyAt = (x, z) => { const i = gxX(x), j = gxZ(z); return i >= 0 && j >= 0 && i < GN && j < GN && canopy[j * GN + i] === 1; };
 
 // ------------------------------------------------------------------ TREES
 const rngT = mkRng(4242);
@@ -241,12 +241,12 @@ const nOsm = trees.length;
   cand.sort((a, b) => D[b] - D[a]);
   const taken = new Uint8Array(GN * GN);
   const mark = (cx, cz, r) => { const rc = r / GS; for (let y = Math.floor(cz - rc); y <= Math.ceil(cz + rc); y++) for (let x = Math.floor(cx - rc); x <= Math.ceil(cx + rc); x++) if (x >= 0 && y >= 0 && x < GN && y < GN && (x - cx) ** 2 + (y - cz) ** 2 <= rc * rc) taken[y * GN + x] = 1; };
-  for (const t of trees) mark((t[0] + 1100) / GS, (t[1] + 1100) / GS, t[3] * 0.85);
+  for (const t of trees) mark((t[0] - OXa) / GS, (t[1] - OZa) / GS, t[3] * 0.85);
   const CAP = 12.5, FILL = 1.05;
   let added = 0, bushes = [];
   for (const i of cand) {
     if (taken[i]) continue;
-    const cx = i % GN, cz = Math.floor(i / GN), x = (cx + 0.5) * GS - 1100, z = (cz + 0.5) * GS - 1100;
+    const cx = i % GN, cz = Math.floor(i / GN), x = (cx + 0.5) * GS + OXa, z = (cz + 0.5) * GS + OZa;
     const natural = D[i] * GS * 1.05; // inscribed crown radius (m)
     const rad = Math.min(natural, CAP * (0.6 + rngT() * 0.45));
     mark(cx, cz, rad * FILL);
@@ -256,7 +256,7 @@ const nOsm = trees.length;
       const sp = pickSpecies(x, z, rad), nom = NOM[sp];
       const r = Math.max(1.3, sp === 3 ? Math.min(rad, 2.2) : sp === 4 ? Math.min(rad, 1.6) : rad);
       trees.push([x, z, sp, r, nom[1] * Math.min(1.35, Math.max(0.5, 0.55 + r / nom[0] * 0.55)) * (0.9 + rngT() * 0.2), rngT() * 6.283, rngT()]); added++;
-    } else if (kind[ci(z) * ON + ci(x)] !== 2 && rngT() < 0.45) bushes.push([x, z, 0.7 + rad * 0.5 + rngT() * 0.5, rngT()]);
+    } else if (kind[ciz(z) * ON + cix(x)] !== 2 && rngT() < 0.45) bushes.push([x, z, 0.7 + rad * 0.5 + rngT() * 0.5, rngT()]);
   }
   console.log('trees: osm', nOsm, '+ aerial', added, 'bushes', bushes.length);
   var aerialBushes = bushes;
@@ -795,7 +795,7 @@ if (DEBUG) {
     for (const s of props.busstops) { const [x, y] = P(s[0], s[1]); svg += `<rect x="${x - 6}" y="${y - 6}" width="12" height="12" fill="orange"/>`; }
     for (const s of props.benches) { const [x, y] = P(s[0], s[1]); svg += `<circle cx="${x}" cy="${y}" r="4" fill="white"/>`; }
     svg += '</svg>';
-    const px = (cx + 1100) * AS, py = (cz + 1100) * AS, pw = w * AS;
+    const px = (cx - OXa) * AS, py = (cz - OZa) * AS, pw = w * AS;
     const base = await sharp('public/map/aerial.webp').extract({ left: Math.round(px - pw / 2), top: Math.round(py - pw / 2), width: Math.round(pw), height: Math.round(pw) }).resize(1400, 1400).toBuffer();
     await sharp(base).composite([{ input: Buffer.from(svg) }]).png().toFile(name);
   };

@@ -42,7 +42,7 @@ void main(){
   float F = 0.04 + 0.96 * pow(clamp(1.0 - dot(-V, N), 0.0, 1.0), 5.0);
   vec3 refl = uSky; float conf = 0.0;
   if (R.z < -0.02) {
-    float t = 0.25 + hash(gl_FragCoord.xy + uTime) * 0.3, stepLen = 0.45; vec2 huv = vec2(0.0);
+    float t = 0.25 + hash(gl_FragCoord.xy) * 0.3, stepLen = 0.45; vec2 huv = vec2(0.0);
     for (int i = 0; i < 40; i++) {
       if (i >= uSteps) break;
       vec3 Q = P + R * t; vec4 cl = uProj * vec4(Q, 1.0); vec2 uv = cl.xy / cl.w * 0.5 + 0.5;
@@ -54,7 +54,8 @@ void main(){
     }
     if (conf > 0.0) {
       vec2 e = min(huv, 1.0 - huv); float ef = smoothstep(0.0, 0.08, min(e.x, e.y));
-      refl = mix(uSky, texture2D(tDiffuse, huv).rgb, ef);
+      vec3 hit = texture2D(tDiffuse, huv).rgb; if (any(isnan(hit)) || any(isinf(hit))) hit = uSky;
+      refl = mix(uSky, hit, ef);
     }
   }
   gl_FragColor.rgb = base.rgb + min(refl, vec3(24.0)) * F * wet * 0.85;

@@ -15,3 +15,11 @@ export function bbox(extra = 0) {
     west: CENTER.lon - h / M_PER_DEG_LON, east: CENTER.lon + h / M_PER_DEG_LON,
   };
 }
+
+// ---- extended city (free-drive area: Republic Square + Baghramyan Ave, Barekamutyun, Orbeli Bros, Komitas Ave to the north / north-west)
+// L0 (full detail) rectangle in local metres, aligned to the 256 m tile grid. x east, z south (north = -z).
+export const REGION = { x0: -2560, x1: 1024, z0: -3584, z1: 1024 };
+// "near-field" texture window: aerial / contact-AO / road-field textures are all mapped over this square (side 2*half, centre cx,cz)
+export const NEAR = { cx: -768, cz: -1280, half: 2304 };
+export const FINE_R = 3800;          // half-size of the fine 5 m height grid (square, centred on the Square)
+export const inRegion = (x, z, m = 0) => x >= REGION.x0 - m && x <= REGION.x1 + m && z >= REGION.z0 - m && z <= REGION.z1 + m;

@@ -150,12 +150,13 @@ async function buildRoadMask() {
 // ------------------------------------------------------------------ road field: world-space raster of road direction / lateral position, baked from data/osm.json
 // RGBA8 PNG over [-EXT, EXT]^2 (north-up like the aerial: u = (x+EXT)/2EXT, v = 1-(z+EXT)/2EXT):
 //   R,G = cos(2a), sin(2a) of the road direction (0.5 = 0)   B = lateral position across the carriageway (0.5 = centre line)   A = half width / 16 m
-const EXT = 1100, FN = 2048;
+import { NEAR } from './config.mjs';
+const FN = 4096, OX = NEAR.cx - NEAR.half, OZ = NEAR.cz - NEAR.half;     // near-field window (shared with src/materials.js)
 async function buildRoadField() {
   const osm = JSON.parse(fs.readFileSync('data/osm.json', 'utf8'));
   const ROAD = { trunk: [14, 8], trunk_link: [7, 6], primary: [13, 7], primary_link: [7, 5], secondary: [10, 6], secondary_link: [6, 4], tertiary: [8, 5], tertiary_link: [5.5, 3], residential: [6.5, 4], unclassified: [6, 4], living_street: [5, 3], service: [3.8, 2], track: [3, 1] };
   const num = v => { if (v == null) return null; const m = String(v).match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : null; };
-  const px = EXT * 2 / FN;
+  const px = NEAR.half * 2 / FN;
   const best = new Float32Array(FN * FN).fill(1e9), data = new Uint8Array(FN * FN * 4);
   const ways = osm.elements.filter(e => e.type === 'way' && e.geometry && e.tags?.highway && ROAD[e.tags.highway]);
   let n = 0;
@@ -167,10 +168,10 @@ async function buildRoadField() {
     for (let k = 1; k < P.length; k++) {
       const [ax, az] = P[k - 1], [bx, bz] = P[k], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz; if (L2 < 1e-6) continue;
       const L = Math.sqrt(L2), tx = dx / L, tz = dz / L, ang2 = 2 * Math.atan2(tz, tx);
-      const r = hw + 1.6, i0 = Math.max(0, Math.floor((Math.min(ax, bx) - r + EXT) / px)), i1 = Math.min(FN - 1, Math.floor((Math.max(ax, bx) + r + EXT) / px));
-      const j0 = Math.max(0, Math.floor((Math.min(az, bz) - r + EXT) / px)), j1 = Math.min(FN - 1, Math.floor((Math.max(az, bz) + r + EXT) / px));
+      const r = hw + 1.6, i0 = Math.max(0, Math.floor((Math.min(ax, bx) - r - OX) / px)), i1 = Math.min(FN - 1, Math.floor((Math.max(ax, bx) + r - OX) / px));
+      const j0 = Math.max(0, Math.floor((Math.min(az, bz) - r - OZ) / px)), j1 = Math.min(FN - 1, Math.floor((Math.max(az, bz) + r - OZ) / px));
       for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-        const X = (i + 0.5) * px - EXT, Z = (j + 0.5) * px - EXT;   // row 0 = north (z = -EXT), like the aerial photo
+        const X = (i + 0.5) * px + OX, Z = (j + 0.5) * px + OZ;   // row 0 = north (z = -EXT), like the aerial photo
         const s = Math.max(0, Math.min(1, ((X - ax) * dx + (Z - az) * dz) / L2)), cx = ax + dx * s, cz = az + dz * s, d = Math.hypot(X - cx, Z - cz);
         if (d > hw + 1.2) continue;
         const score = d / hw - rank * 0.05; if (score >= best[j * FN + i]) continue;
@@ -198,7 +199,7 @@ for (const [name, d] of Object.entries(SETS)) {
   try { manifest.sets[name] = await buildSet(name, d); } catch (e) { console.warn('SKIP', name, e.message); }
 }
 if (!want.length || want.includes('road_decals')) manifest.sets.road_decals = await buildRoadMask();
-if (!args.includes('--no-field') && (!want.length || want.includes('roadfield'))) { await buildRoadField(); manifest.roadfield = { file: 'roadfield.png', extent: EXT, size: FN, note: 'RG=cos/sin(2*dir) B=lateral 0..1 A=halfwidth/16m' }; }
+if (!args.includes('--no-field') && (!want.length || want.includes('roadfield'))) { await buildRoadField(); manifest.roadfield = { file: 'roadfield.png', extent: NEAR.half, size: FN, note: 'RG=cos/sin(2*dir) B=lateral 0..1 A=halfwidth/16m' }; }
 fs.writeFileSync(manPath, JSON.stringify(manifest, null, 1));
 let total = 0; const walk = d => { for (const f of fs.readdirSync(d, { withFileTypes: true })) f.isDirectory() ? walk(path.join(d, f.name)) : (total += fs.statSync(path.join(d, f.name)).size); }; walk(OUT);
 console.log('public/tex total', mb(total));

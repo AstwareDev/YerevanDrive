@@ -12,7 +12,7 @@ import { writeGlb } from './lib/glb.mjs';
 
 const only = process.argv[2] ? process.argv[2].split(',').map(Number) : [1, 2, 3, 4];
 const LV = {
-  1: { S: 512, R: 3072, drop: 0.35, bld: { minArea: 30, eps: 1.0 }, roads: true },
+  1: { S: 512, R: 4096, drop: 0.35, bld: { minArea: 30, eps: 1.0 }, roads: true },
   2: { S: 1024, R: 4096, drop: 0.9, bld: { minArea: 110, eps: 2.5 }, roads: false },
   3: { S: 2048, R: 8192, drop: 2.2, bld: { minArea: 450, eps: 5, minH: 15 }, roads: false },
   4: { S: 4096, R: 16384, drop: 5.0, bld: null, roads: false },

@@ -67,7 +67,8 @@ export function dressStructures(kit, tr) {
     S.box(cx, base + size / 2, cz, 0.05, size + 0.08, 0.05, fr.yaw, C.dark); // frame backing (slim) keeps the sign from looking paper-thin
   };
   const wallOf = {}; for (const w of kit.walls[tr.id] ?? []) wallOf[w.co.n] = w;
-  for (const co of c.corners) {
+  const showSigns = new URLSearchParams(location.search).get('signs') === '1';     // road signs are off by default (?signs=1 restores them)
+  for (const co of (showSigns ? c.corners : [])) {
     if (co.severity < 2 || (lowQ && co.severity < 3)) continue;
     const sg = co.dir === 'R' ? -1 : 1, w = wallOf[co.n], extra = w ? 0.5 + w.cols * 0.64 + 0.5 : 0.8;
     const signTile = kit.signTile(tr.id, co.n);

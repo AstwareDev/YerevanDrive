@@ -11,7 +11,10 @@ export default async function (ctx) {
   const parts = [];
   const guard = async (name, fn) => { try { const t0 = performance.now(); const p = await fn(); if (p) parts.push(p); console.log(`[props] ${name} ready in ${(performance.now() - t0).toFixed(0)} ms`); } catch (e) { console.error(`[props] ${name} failed`, e); } };
   await guard('vegetation', () => buildVegetation({ ...ctx, data }));
-  await guard('cars', () => buildCars({ ...ctx, data }));
+  // parked cars are off by default so the roads are clear for the player car; add ?cars=1 to bring them back
+  if (new URLSearchParams(location.search).get('cars') === '1') await guard('cars', () => buildCars({ ...ctx, data }));
+  // road signs, traffic lights, street-name plates, stop poles and rooftop / blade signs are off by default (?signs=1 restores them)
+  if (new URLSearchParams(location.search).get('signs') !== '1') for (const k of ['signs', 'signals', 'names', 'stoppoles', 'rooftop', 'blades']) data[k] = [];
   await guard('furniture', () => buildFurniture({ ...ctx, data }));
   // debug helper: window.__props.view(kind, index, distance, height, stride, targetHeight) frames a prop from the front
   const viewFn = (k, i, dist = 8, h = 2.2, st = 4, ty = 1.2, side = 0) => { const d = data[k], x = d[i * st], z = d[i * st + 1], yaw = d[i * st + 2] + side, g = H(x, z); window.__yerevan?.setCam(x + Math.sin(yaw) * dist, g + h, z + Math.cos(yaw) * dist, x, g + ty, z); return [x, z, yaw]; };
