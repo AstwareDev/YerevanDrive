@@ -24,7 +24,10 @@ function edgeFacing(ring, P) {
   return best;
 }
 
-export function buildShopSigns({ THREE, root, H, fp }) {
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+const BRANDS = [['MANGO', '#111111', '#f2f2f2'], ['ZARA', '#f4f4f4', '#111111'], ['SAS', '#0b5d3a', '#ffffff'], ['Burger House', '#c8102e', '#ffe14d'], ['Cafe Central', '#3b2418', '#f1d9a8'], ['PANDOK', '#7a1f1f', '#ffffff'], ['Tashir Pizza', '#e8e0d0', '#b3141b'], ['Vero Mondo', '#1b2a49', '#e6c36a'], ['Pharm', '#0f7a4b', '#ffffff'], ['OPTICA', '#20232a', '#8fd3ff'], ['SPORT', '#f26a1b', '#ffffff'], ['Gold & Co', '#201a10', '#f0c75e'], ['Bakery', '#f1e3c6', '#6b3b1a'], ['BANK', '#0a3d91', '#ffffff']];
+
+export function buildShopSigns({ THREE, root, H, fp, northern = [] }) {
   const items = [], night = () => window.__yerevan?.tod?.night ?? 1;
   const put = (m, pos, n, yaw, yOff = 0) => { m.position.set(pos[0] + n[0] * 0.12, H(pos[0], pos[1]) + yOff, pos[1] + n[1] * 0.12); m.rotation.y = yaw; root.add(m); };
   const yawOf = n => Math.atan2(n[0], n[1]);
@@ -50,6 +53,18 @@ export function buildShopSigns({ THREE, root, H, fp }) {
     if ((best.q[0] - cen[0]) * n[0] + (best.q[1] - cen[1]) * n[1] < 0) n = [-n[0], -n[1]];
     const s = plate(THREE, 3.2, 0.7, (g, w, h) => { g.fillStyle = bg; g.fillRect(0, 0, w, h); text(g, w, h, name, fg, '800'); });
     put(s.mesh, best.q, n, yawOf(n), 3.3); items.push({ mat: s.mat, k: 0.9 });
+  }
+  // ---- Northern Avenue: brand fascias above the arcade, one every other bay, merged per brand (one draw call each)
+  {
+    const per = BRANDS.map(() => []), P = new THREE.Object3D(); let nS = 0;
+    for (const inf of northern) for (const E of inf.avEdges || []) for (let k = 0; k < E.nB; k += 2) {
+      const h = Math.abs(Math.sin(E.i * 12.9898 + k * 78.233 + inf.ring[0][0] * 0.37) * 43758.5453) % 1, b = Math.floor(h * BRANDS.length), w = Math.min(E.bw * 1.1, 4.2);
+      const a = (k + 0.5) * E.bw, p = [E.F.o[0] + E.F.t[0] * a + E.F.n[0] * 0.2, E.F.o[2] + E.F.t[1] * a + E.F.n[1] * 0.2];
+      const g = new THREE.PlaneGeometry(w, 0.8); P.position.set(p[0], inf.yFloor0 + 4.5, p[1]); P.rotation.set(0, Math.atan2(E.F.n[0], E.F.n[1]), 0); P.scale.set(1, 1, 1); P.updateMatrix(); g.applyMatrix4(P.matrix); per[b].push(g); nS++;
+    }
+    per.forEach((gs, b) => { if (!gs.length) return; const [name, bg, fg] = BRANDS[b]; const pl = plate(THREE, 4.2, 0.8, (g, w, h) => { g.fillStyle = bg; g.fillRect(0, 0, w, h); g.strokeStyle = fg; g.globalAlpha = 0.5; g.lineWidth = 4; g.strokeRect(4, 4, w - 8, h - 8); g.globalAlpha = 1; text(g, w, h, name, fg, '800'); });
+      const mesh = new THREE.Mesh(mergeGeometries(gs), pl.mat); mesh.frustumCulled = true; root.add(mesh); items.push({ mat: pl.mat, k: 0.95 }); });
+    console.log('[shopsigns] northern', nS, 'fascias');
   }
   console.log('[shopsigns]', items.length, 'signs');
   return { update() { const n = night(); for (const it of items) { const k = it.k * (0.62 + 0.38 * n) * (it.glow ? 0.8 + 0.5 * n : 1); it.mat.color.setRGB(k, k, k); } } };

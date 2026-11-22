@@ -35,7 +35,7 @@ for (const f of files) for (const e of JSON.parse(fs.readFileSync(f, 'utf8')).el
   const t = e.tags || {};
   if (t.building && !t['building:part']) {
     if (e.type === 'way' && e.geometry) { const p = pts(e.geometry); if (p.length > 3) buildings.push({ id: e.id, outer: p.slice(0, -1), t }); }
-    else if (e.type === 'relation' && e.members) { const O = assembleRings(e.members.filter(m => m.type === 'way' && m.role !== 'inner' && m.geometry).map(m => m.geometry)); O.forEach((o, n) => buildings.push({ id: e.id * 10 + n, outer: pts(o).slice(0, -1), t })); }
+    else if (e.type === 'relation' && e.members) { const O = assembleRings(e.members.filter(m => m.type === 'way' && m.role !== 'inner' && m.geometry).map(m => m.geometry)); O.forEach((o, n) => buildings.push({ id: e.id * 10 + n, rel: e.id, outer: pts(o).slice(0, -1), t })); }
   } else if (t.highway && e.type === 'way' && e.geometry && t.tunnel !== 'yes') roads.push({ id: e.id, line: pts(e.geometry), cls: t.highway, t });
 }
 const skip = fs.existsSync('data/landmark-skip.json') ? JSON.parse(fs.readFileSync('data/landmark-skip.json', 'utf8')) : { ids: [], circles: [] };
@@ -115,7 +115,8 @@ const resample = (line, step) => { const out = [line[0]]; for (let i = 1; i < li
 
 // ------------------------------------------------------------------ spatial index by tile
 const bBy = new Map(); // key L|i|j -> buildings
-for (const bd of buildings) { if (skipIds.has(bd.id)) continue; const cx = bd.outer.reduce((s, p) => s + p[0], 0) / bd.outer.length, cz = bd.outer.reduce((s, p) => s + p[1], 0) / bd.outer.length; bd.cx = cx; bd.cz = cz; if (Math.abs(cx) > DATA_R || Math.abs(cz) > DATA_R) continue; for (const L of only) { const S = LV[L].S, k = `${L}|${Math.floor(cx / S)}|${Math.floor(cz / S)}`; (bBy.get(k) ?? bBy.set(k, []).get(k)).push(bd); } }
+
+for (const bd of buildings) { if (skipIds.has(bd.id) || (bd.rel && skipIds.has(bd.rel))) continue; /* relations carry id*10+n: match the OSM relation id too */ const cx = bd.outer.reduce((s, p) => s + p[0], 0) / bd.outer.length, cz = bd.outer.reduce((s, p) => s + p[1], 0) / bd.outer.length; bd.cx = cx; bd.cz = cz; if (Math.abs(cx) > DATA_R || Math.abs(cz) > DATA_R) continue; for (const L of only) { const S = LV[L].S, k = `${L}|${Math.floor(cx / S)}|${Math.floor(cz / S)}`; (bBy.get(k) ?? bBy.set(k, []).get(k)).push(bd); } }
 const rBy = new Map(); // L1 roads by tile
 if (only.includes(1)) for (const r of roads) { if (!RW[r.cls]) continue; const S = LV[1].S; const seen2 = new Set(); for (const p of r.line) { if (Math.abs(p[0]) > DATA_R || Math.abs(p[1]) > DATA_R) continue; const k = `${Math.floor(p[0] / S)}|${Math.floor(p[1] / S)}`; if (seen2.has(k)) continue; seen2.add(k); (rBy.get(k) ?? rBy.set(k, []).get(k)).push(r); } }
 

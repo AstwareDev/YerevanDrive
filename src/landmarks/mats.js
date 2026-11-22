@@ -1,5 +1,6 @@
 // Procedural canvas textures + materials for the landmark buildings (tuff ashlar, roof tile, glass, floodlight shader patch).
 import * as THREE from 'three';
+import { quality } from '../quality.js';
 
 function hash(ix, iy, seed) { let h = Math.imul(ix * 374761393 + iy * 668265263 + seed * 1442695041, 1274126177); h = Math.imul(h ^ (h >>> 13), 1103515245); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 function vn(x, y, p, seed) { const xi = Math.floor(x), yi = Math.floor(y), tx = x - xi, ty = y - yi, s = t => t * t * (3 - 2 * t), sx = s(tx), sy = s(ty), w = v => ((v % p) + p) % p; return (hash(w(xi), w(yi), seed) * (1 - sx) + hash(w(xi + 1), w(yi), seed) * sx) * (1 - sy) + (hash(w(xi), w(yi + 1), seed) * (1 - sx) + hash(w(xi + 1), w(yi + 1), seed) * sx) * sy; }
@@ -20,7 +21,7 @@ function ashlar(base, { size = 512, courses = 8, seed = 3, yellow = 0.0, rustic 
     for (let x = 0; x < size; x++) {
       const bx = Math.floor((x + off) / blockW), lx = (x + off) - bx * blockW;
       const bid = row * 17 + bx * 3;
-      const tone = 0.9 + hash(bid, 5, seed) * 0.22, hue = hash(bid, 6, seed);
+      const tone = 0.94 + hash(bid, 5, seed) * 0.12, hue = hash(bid, 6, seed);
       const u = x / size, v = y / size;
       const n = fbm(u, v, 6, 3, seed + 4), grain = hash(x, y, seed + 9);
       let r = base[0], g = base[1], b = base[2];
@@ -34,8 +35,8 @@ function ashlar(base, { size = 512, courses = 8, seed = 3, yellow = 0.0, rustic 
       if (pits && hash(x >> 1, y >> 1, seed + 21) > 0.992) { r *= 0.82; g *= 0.8; b *= 0.78; h -= 0.12; }
       // joints
       const jd = Math.min(ly, ch - ly, lx, blockW - lx);
-      const jw = rustic ? 4.5 : 2.2;
-      if (jd < jw) { const f = jd < jw * 0.5 ? 0.5 : 0.75; r *= f; g *= f; b *= f; h -= 0.35; }
+      const jw = (rustic ? 4.5 : 1.5) * size / 512;
+      if (jd < jw) { const f = rustic ? (jd < jw * 0.5 ? 0.5 : 0.75) : (jd < jw * 0.5 ? 0.7 : 0.86); r *= f; g *= f; b *= f; h -= 0.35; }
       else if (rustic && jd < jw + 3) { h -= 0.08; }
       const i = (y * size + x) * 4;
       ic.data[i] = Math.min(255, r); ic.data[i + 1] = Math.min(255, g); ic.data[i + 2] = Math.min(255, b); ic.data[i + 3] = 255;
@@ -91,15 +92,16 @@ float wN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); 
 }
 
 function glassPatch(mat, k = 1.0) {
+  const U = { uEK: { value: k }, uDay: { value: 0 } }; mat.userData.glassU = U;   // uDay (0 night .. 1 day) is driven from landmarks.js
   // unlit panes carry a per-window id in vertex-colour blue (see facade.js glassCols) and window-local uv: draw a believable interior by day
   // (curtains with folds, slatted blinds, lace, a dim room) instead of a black hole; it is lit by the sun / shadows like any diffuse surface.
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uEK = { value: k };
+    sh.uniforms.uEK = U.uEK; sh.uniforms.uDay = U.uDay;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
 varying vec2 vGuv;`).replace('#include <begin_vertex>', `#include <begin_vertex>
 vGuv = uv;`);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-uniform float uEK; varying vec2 vGuv;
+uniform float uEK, uDay; varying vec2 vGuv;
 float gH(float x){ return fract(sin(x * 91.7 + 13.1) * 43758.5453); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float gFm = 0.0;
@@ -120,6 +122,8 @@ float gH(float x){ return fract(sin(x * 91.7 + 13.1) * 43758.5453); }`)
           } else if (id >= 0.78 && id < 0.9) { cov = 0.55; fab = vec3(0.62, 0.6, 0.57); }
           vec3 inner = mix(room, fab, cov);
           diffuseColor.rgb = mix(diffuseColor.rgb, inner, unl);
+          // lit rooms by day: a dim warm interior instead of a glowing white pane
+          diffuseColor.rgb = mix(diffuseColor.rgb, room * 1.6 + vColor.rgb * 0.09, uDay * (1.0 - unl));
           gFm = unl * cov;
         }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
@@ -127,22 +131,25 @@ roughnessFactor = mix(roughnessFactor, 0.85, gFm);`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
 metalnessFactor = mix(metalnessFactor, 0.0, gFm);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
- totalEmissiveRadiance = vColor.rgb * uEK;`);
+ totalEmissiveRadiance = vColor.rgb * uEK * mix(1.0, 0.05, uDay);`);
   };
-  mat.customProgramCacheKey = () => 'lmglass2';
+  mat.customProgramCacheKey = () => 'lmglass3';
   return mat;
 }
 
 export function makeLandmarkMaterials(renderer, T) {
   const aniso = renderer?.capabilities?.getMaxAnisotropy?.() ?? 8;
   const S = {}; const rep = [1, 1];   // uv is already in 4 m units (kit.js uvS): one 512 px ashlar tile = 4 m, 0.5 m courses
-  const mk = (base, o, mo) => { const { col, bmp } = ashlar(base, o); const map = toTex(col, true, rep, aniso), bump = toTex(bmp, false, rep, aniso); return new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: mo?.bump ?? 1.6, roughness: mo?.rough ?? 0.9, metalness: 0, vertexColors: true }); };
+  const AS = quality.texSize >= 2048 ? 1024 : 512;
+  const mk = (base, o, mo) => { const { col, bmp } = ashlar(base, { size: AS, ...o }); const map = toTex(col, true, rep, aniso), bump = toTex(bmp, false, rep, aniso); return new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: mo?.bump ?? 1.6, roughness: mo?.rough ?? 0.9, metalness: 0, vertexColors: true }); };
   const M = {};
   M.rose = floodPatch(mk([224, 158, 124], { seed: 3, yellow: 0.0 }), { col: [1.0, 0.58, 0.28], base: 0.05, up: 0.85, L: 15 });
   M.pink = floodPatch(mk([200, 141, 131], { seed: 7, yellow: 0.0 }), { col: [1.0, 0.58, 0.34], base: 0.05, up: 0.85, L: 15 });   // Marriott block: mauve-pink tuff with pale bands (ground-level 360 Stories view)
   M.cream = floodPatch(mk([226, 196, 148], { seed: 5, yellow: 0.3 }), { col: [1.0, 0.64, 0.32], base: 0.05, up: 0.85, L: 15 });
   M.rust = floodPatch(mk([205, 140, 108], { seed: 9, yellow: -0.1, rustic: 1 }, { bump: 2.4 }), { col: [1.0, 0.55, 0.26], base: 0.05, up: 1.0, L: 10 });
   M.basalt = floodPatch(mk([88, 82, 84], { seed: 12, yellow: -0.3, pits: 1 }), { col: [1.0, 0.6, 0.3], base: 0.02, up: 0.9, L: 4 });
+  M.grey = floodPatch(mk([148, 145, 140], { seed: 31, yellow: 0.12, courses: 10 }, { bump: 2.0 }), { col: [1.0, 0.66, 0.38], base: 0.05, up: 0.85, L: 16 });   // Opera: warm grey tuff/basalt (Wikimedia photos)
+  M.sand = floodPatch(mk([228, 192, 150], { seed: 33, yellow: 0.2, courses: 6 }, { bump: 1.2 }), { col: [1.0, 0.64, 0.34], base: 0.05, up: 0.85, L: 18 });   // Cathedral: pale peach limestone
   M.white = floodPatch(mk([232, 226, 216], { seed: 14, yellow: 0.1 }), { col: [1.0, 0.66, 0.36], base: 0.05, up: 0.85, L: 18 });
   const tile = toTex(tileTexture(256), true, [1 / 3, 1 / 3], aniso);
   M.tile = floodPatch(new THREE.MeshStandardMaterial({ map: tile, roughness: 0.65, metalness: 0, vertexColors: true, color: 0xffd0c0 }), { col: [1, 0.55, 0.35], base: 0.07, up: 0.28, L: 40 });
@@ -162,6 +169,8 @@ export function makeLandmarkMaterials(renderer, T) {
   M.metal = new THREE.MeshStandardMaterial({ color: 0x3b4a44, roughness: 0.45, metalness: 0.7, vertexColors: true });
   M.copper = new THREE.MeshStandardMaterial({ color: 0x4f8a7c, roughness: 0.5, metalness: 0.55, vertexColors: true, emissive: 0x0a1a16 });
   M.dark = new THREE.MeshStandardMaterial({ color: 0x1a1b20, roughness: 0.6, metalness: 0.5, vertexColors: true });
+  M.bronze = new THREE.MeshStandardMaterial({ color: 0x4a3f30, roughness: 0.45, metalness: 0.7, vertexColors: true });   // statues
+  M.cypress = new THREE.MeshStandardMaterial({ color: 0x1d3a22, roughness: 0.95, metalness: 0, vertexColors: true });  // clipped cypress / evergreen cones
   M.lamp = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   M.decal = new THREE.MeshBasicMaterial({ map: T?.glow, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });
   M.clockface = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });

@@ -24,16 +24,17 @@ export default async function (ctx) {
 
   const m = new Mesher((x, z) => H(x, z));
   buildEnsemble(m, fp, hidden);
-  buildNorthern(m, fp, hidden);
+  const northern = buildNorthern(m, fp, hidden);
   buildOpera(m);
   buildCathedral(m, fp);
   const fountain = buildFountain({ m, root, H, renderer, camera: ctx.camera, mats });
   upd.push(fountain.update);
-  upd.push(buildShopSigns({ THREE, root, H, fp }).update);
+  upd.push(buildShopSigns({ THREE, root, H, fp, northern }).update);
 
   const meshes = m.toThree(THREE, mats);
   let tris = 0; for (const me of meshes) { root.add(me); tris += me.userData.tris; me.updateMatrix(); }
   console.log(`landmarks: ${(tris / 1e3).toFixed(0)}k tris, ${meshes.length} meshes, ${(performance.now() - t0).toFixed(0)} ms`);
   window.__landmarks = { root, mats, tris };
-  return { update(dt, camera, time) { for (const u of upd) u(dt, camera, time); } };
+  const gU = mats.glass?.userData?.glassU;
+  return { update(dt, camera, time) { if (gU) gU.uDay.value = 1 - (window.__yerevan?.tod?.night ?? 1); for (const u of upd) u(dt, camera, time); } };
 }

@@ -163,7 +163,7 @@ export function building(m, ringIn, o) {
   const y0 = o.y0 ?? gmin + 0.12, ph = o.plinth ?? 1.3;
   const wallB = o.wall ?? 'rose', trimB = o.trim ?? wallB;
   const tint = o.tint ?? [1, 1, 1], trimTint = o.trimTint ?? [1.12, 1.1, 1.06];
-  const B = { wall: wallB, trim: trimB, wallCol: tint, trimCol: trimTint, frameCol: [0.85, 0.82, 0.75], plain: false };
+  const B = { wall: wallB, trim: trimB, wallCol: tint, trimCol: trimTint, frameCol: o.frameCol ?? [0.85, 0.82, 0.75], plain: false };
   const yFloor0 = y0 + ph; let yTop = yFloor0; for (const f of o.floors) yTop += f.h;
   const info = { ring, y0, yFloor0, yTop, edges: [] };
   const topH = yTop - y0;
