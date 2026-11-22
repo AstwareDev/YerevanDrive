@@ -21,7 +21,8 @@
     "build:car": "node tools/build-car.mjs",
     "sim:car": "node tools/sim-car.mjs",
     "build:nav": "node tools/build-nav.mjs",
-    "test:nav": "node tools/test-nav.mjs"
+    "test:nav": "node tools/test-nav.mjs",
+    "docs:diagrams": "node tools/diagrams/build.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",

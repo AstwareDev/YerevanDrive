@@ -1,14 +1,32 @@
 # Yerevan Drift — Republic Square map (Three.js)
 
-2 km × 2 km map of central Yerevan centered on Republic Square (40.17765 N, 44.5127 E), built from open data + real aerial imagery. Night by default (neon, wet asphalt), day mode on `T`.
+A drivable 3D map of central Yerevan around Republic Square (40.17765 N, 44.5127 E), built from open data + real aerial imagery. Night by default (neon, wet asphalt), day mode on `T`. Drive a drift car, fly the free camera, search addresses with a GPS navigator, or join other drivers online. Everything runs in the browser; there is no backend.
 
-## Run
+## Quick start
+You need [Node.js](https://nodejs.org/) 22 or newer. The baked map data (`public/`, ~240 MB) is committed, so a fresh clone runs as is; you do **not** have to rebuild anything.
+
+```
+npm install
+npm run dev      # then open the printed address (usually http://localhost:5173)
+```
+
+Use a desktop browser with WebGL2 and a dedicated GPU if you can. The game picks a quality preset automatically (`?q=low|med|high|ultra` overrides it, see *Performance* below).
+
 ```
 npm run dev      # viewer: 1 orbit · 2 fly (drag, WASD, Q/E, Shift, wheel) · 3 drive tour · N next road · T day/night · R wet/dry · B bloom · H hide HUD
 npm run build    # production bundle (dist/)
 ```
 
+## How it works (UML)
+![Component overview](docs/img/01-components.png)
+
+`src/main.js` owns the renderer, camera modes and the frame loop, and auto-loads independent **plug-ins** (landmarks, props, car, map/GPS, multiplayer, menu). The map itself is baked offline by the scripts in `tools/` and streamed as LOD tiles at run time.
+
+Full UML set in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: start-up and per-frame sequence diagrams, car and streaming class diagrams, the menu / camera state machine and the build-time data pipeline. Regenerate the images with `npm run docs:diagrams`.
+
 ## Rebuild the data (order matters)
+`npm run build:all` runs the baking tools in the right order (orbeli → landmarks → map → tiles → props → clean-onroad → car → nav). The older step list below still shows what each tool does; the *Extended city* section further down has the current fetch order.
+
 ```
 npm run data              # OSM (Overpass) + elevation (AWS Terrain Tiles z15)      -> data/
 npm run imagery           # aerial mosaics (z18 whole map, z19 centre)               -> public/map/aerial*.webp
