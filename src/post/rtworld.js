@@ -7,6 +7,7 @@
 // The bake runs in a worker (src/post/rtbake.worker.js) so loading is not blocked; until it arrives the tracer is switched off (uRTon = 0).
 import * as THREE from 'three';
 import { shared } from '../materials.js';
+import { fetchJSON } from '../net.js';
 import { farShared } from '../world/farMaterials.js';
 
 export const RT = { CELL: 2, COARSE: 8, rect: { x0: -2688, z0: -3712, w: 3840, h: 4864 } };     // REGION (tools/config.mjs) + 128 m apron
@@ -77,7 +78,7 @@ vec3 shadeHF(vec3 p, vec3 rd, vec3 n, vec4 info, vec3 sunDir, vec3 sunCol, vec3 
 
 /** start the bake; resolves when the textures are live (tracer switches itself on) */
 export async function initRTWorld({ heightGrid }) {
-  const col = await (await fetch('/map/colliders.json')).json();
+  const col = await fetchJSON('/map/colliders.json');
   const buildings = col.buildings.filter(b => b.r?.length >= 6 && Number.isFinite(b.b)).map(b => ({ r: b.r, b: b.b }));
   const worker = new Worker(new URL('./rtbake.worker.js', import.meta.url), { type: 'module' });
   const { N, STEP, R, base, g } = heightGrid;

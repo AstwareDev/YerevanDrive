@@ -168,6 +168,8 @@ export class CellFamily {
     for (let i = 0; i < n; i++) {
       if (keep && !keep(i)) continue;
       const x = m[i * 16 + 12], z = m[i * 16 + 14]; if (!Number.isFinite(x + z)) continue;
+      // degenerate instances (zero scale -> w = 0, or an absurd 60 m+ axis from a bad data point at the origin) rasterise as long streaks fanning out from one point: drop them
+      { let bad = false; for (let q = 0; q < 3; q++) { const l = Math.hypot(m[i * 16 + q * 4], m[i * 16 + q * 4 + 1], m[i * 16 + q * 4 + 2]); if (!(l > 1e-4 && l < 60)) bad = true; } if (bad) continue; }
       const k = Math.floor(x / cell) * 4096 + Math.floor(z / cell); let c = map.get(k); if (!c) map.set(k, c = { items: [], x0: 1e9, x1: -1e9, z0: 1e9, z1: -1e9, y0: 1e9, y1: -1e9 });
       c.items.push(i); c.x0 = Math.min(c.x0, x); c.x1 = Math.max(c.x1, x); c.z0 = Math.min(c.z0, z); c.z1 = Math.max(c.z1, z); const y = m[i * 16 + 13]; c.y0 = Math.min(c.y0, y); c.y1 = Math.max(c.y1, y);
     }

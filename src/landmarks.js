@@ -8,6 +8,7 @@ import { buildOpera } from './landmarks/opera.js';
 import { buildCathedral } from './landmarks/cathedral.js';
 import { buildNorthern } from './landmarks/northern.js';
 import { buildFountain } from './landmarks/fountain.js';
+import { buildShopSigns } from './landmarks/shopsigns.js';
 
 export default async function (ctx) {
   const { THREE, scene, renderer, T, H } = ctx;
@@ -28,6 +29,7 @@ export default async function (ctx) {
   buildCathedral(m, fp);
   const fountain = buildFountain({ m, root, H, renderer, camera: ctx.camera, mats });
   upd.push(fountain.update);
+  upd.push(buildShopSigns({ THREE, root, H, fp }).update);
 
   const meshes = m.toThree(THREE, mats);
   let tris = 0; for (const me of meshes) { root.add(me); tris += me.userData.tris; me.updateMatrix(); }

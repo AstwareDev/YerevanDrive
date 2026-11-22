@@ -30,7 +30,7 @@ function frameOf(a, b) { const e = [b[0] - a[0], b[1] - a[1]]; const L = Math.hy
 function wallRect(m, F, wall, a0, a1, v0, v1, col) { if (a1 - a0 > 1e-3 && v1 - v0 > 1e-3) m.fq(wall, F, [[a0, v0, 0], [a1, v0, 0], [a1, v1, 0], [a0, v1, 0]], [0, 0, 1], { col }); }
 
 function glassCols(rnd, lit, gradient = true) {
-  if (!lit) return [DARK, DARK, DARK, DARK];
+  if (!lit) { const c = [DARK[0], DARK[1], 0.034 + rnd() * 0.001]; return [c, c, c, c]; }   // blue channel carries a per-window id for the interior shader (curtains / blinds / lace)
   const c = WARM[Math.floor(rnd() * WARM.length)], k = 0.55 + rnd() * 0.65, cur = rnd() < 0.5 ? 0.25 + rnd() * 0.4 : 1;
   const top = c.map(x => x * k * cur), bot = c.map(x => x * k);
   return [bot, bot, top, top];
@@ -47,7 +47,7 @@ function rectWindow(m, F, cell, o, rnd, B) {
   m.fq(w, F, [[a0, v0, 0], [a0, v0, -rev], [a0, v1, -rev], [a0, v1, 0]], [1, 0, 0], { col });
   m.fq(w, F, [[a1, v0, -rev], [a1, v0, 0], [a1, v1, 0], [a1, v1, -rev]], [-1, 0, 0], { col });
   const lit = rnd() < (o.lit ?? 0.2);
-  m.fq('glass', F, [[a0, v0, -rev], [a1, v0, -rev], [a1, v1, -rev], [a0, v1, -rev]], [0, 0, 1], { cols: glassCols(rnd, lit) });
+  m.fq('glass', F, [[a0, v0, -rev], [a1, v0, -rev], [a1, v1, -rev], [a0, v1, -rev]], [0, 0, 1], { cols: glassCols(rnd, lit), uvFn: i => [[0, 0], [1, 0], [1, 1], [0, 1]][i] });
   // frame: mullion + transom
   const fc = B.frameCol;
   m.fbox('frame', F, am - 0.035, am + 0.035, v0, v1, -rev, -rev + 0.07, { col: fc, skip: 'blrt' });
@@ -96,7 +96,8 @@ function archOpening(m, F, cell, o, rnd, B) {
   let cols;
   if (o.deep) { const k = 0.55 + rnd() * 0.3; cols = poly.map(p => p[1] > vs ? [1.5 * k, 0.9 * k, 0.45 * k] : [0.55 * k, 0.33 * k, 0.17 * k]); }
   else { const gc = glassCols(rnd, lit); cols = poly.map(p => (p[1] > vs ? gc[2] : gc[0])); }
-  m.face(B.deep ? 'glass' : 'glass', poly.map(p => m.P(F, p[0], p[1], p[2])), m.H(F, 0, 0, 1), { cols });
+  const wv = vs + r - vb;
+  m.face('glass', poly.map(p => m.P(F, p[0], p[1], p[2])), m.H(F, 0, 0, 1), { cols, uvFn: i => [(poly[i][0] - (am - r)) / (2 * r), (poly[i][1] - vb) / wv] });
   if (!o.deep) {
     m.fbox('frame', F, am - 0.035, am + 0.035, vb, vs + r, -rev, -rev + 0.07, { col: B.frameCol, skip: 'blrt' });
     m.fbox('frame', F, am - r, am + r, vs - 0.04, vs + 0.04, -rev, -rev + 0.07, { col: B.frameCol, skip: 'blrt' });

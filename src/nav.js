@@ -8,6 +8,7 @@ import { MapRenderer } from './nav/mapview.js';
 import { buildDOM, maneuverIcon, catIcon } from './nav/ui.js';
 import { createWorld3D } from './nav/world3d.js';
 import { project } from './nav/geo.js';
+import { quality } from './quality.js';
 
 const REGION_PAD = 60;
 export default async function ({ THREE, scene, camera, meta, H, drive }) {
@@ -18,6 +19,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
   const places = [{ name: 'Republic Square', x: 0, z: 0 }, ...(meta.places ?? [])];
 
   // ------------------------------------------------------------------ state
+  const MINI_HZ = { low: 8, med: 12, high: 15, ultra: 20 }[quality.level] ?? 12;
   let open = false, dirty = true, drawT = 0, miniT = 0, streetT = 0, sat = false;
   const view = { cx: 0, cz: 0, mpp: 2.2 };
   let fly = null;                                     // {t, dur, from:{cx,cz,mpp}, to:{...}}
@@ -46,7 +48,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
   const cvs = ui.cv, ctx2 = cvs.getContext('2d'); let CW = 1, CH = 1, dpr = 1;
   const fit = () => { const r = cvs.getBoundingClientRect(); dpr = Math.min(2, window.devicePixelRatio || 1); CW = Math.max(1, r.width); CH = Math.max(1, r.height); const w = Math.round(CW * dpr), h = Math.round(CH * dpr); if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; } dirty = true; };
   new ResizeObserver(fit).observe(cvs);
-  const mc = ui.mc, mctx = mc.getContext('2d'); const MINI = 244; { const d = Math.min(2, window.devicePixelRatio || 1); mc.width = MINI * d; mc.height = MINI * d; mc.dpr = d; }
+  const mc = ui.mc, mctx = mc.getContext('2d'); const MINI = 244; { const d = quality.level === 'ultra' || quality.level === 'high' ? Math.min(2, window.devicePixelRatio || 1) : 1; mc.width = MINI * d; mc.height = MINI * d; mc.dpr = d; }
   let xf = null;                                      // last draw's world<->screen helpers
 
   function drawMap() {
@@ -140,6 +142,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
     if (r.kind === 'online') { [x, z] = project(r.lat, r.lon); }
     if (nav) { const R = nav.region; outside = x < R.x0 + REGION_PAD || x > R.x1 - REGION_PAD || z < R.z0 + REGION_PAD || z > R.z1 - REGION_PAD; }
     sel = { ...r, x, z, outside };
+    if (!outside) drive.prefetch?.(x, z);
     if (fromList && r.kind !== 'pin') { recents = [{ kind: r.kind === 'place' ? 'place' : r.kind, title: r.title, sub: (r.sub || '').replace(/ · Recent$/, '').replace(/^Quick place$/, ''), x, z, cat: r.cat }, ...recents.filter(q => q.title !== r.title)].slice(0, 6); try { localStorage.setItem('nv.recent', JSON.stringify(recents)); } catch { /* ignore */ } }
     w3.pin.set(x, z);
     flyTo(x, z, Math.min(view.mpp, fromList ? 1.4 : view.mpp)); showCard(); dirty = true;
@@ -171,7 +174,7 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
   function teleportTo(t) {
     if (!nav || !drive.car) return; const s = nav.snap(t.x, t.z, 400); if (!s) return toast('No road nearby');
     const toward = Math.atan2(t.x - s.x, t.z - s.z); let h = s.heading; if (!s.oneway && Math.cos(h - toward) < 0 && Math.hypot(t.x - s.x, t.z - s.z) > 20) h += Math.PI;
-    drive.car.teleport(s.x, s.z, h); setOpen(false); if (!drive.active) drive.set(true); toast(`Teleported to ${t.title}`);
+    drive.prefetch?.(s.x, s.z); drive.car.teleport(s.x, s.z, h); setOpen(false); if (!drive.active) drive.set(true); toast(`Teleported to ${t.title}`);
   }
   function show3D(t) { setOpen(false); drive.lookAt?.(t.x, t.z, 240); toast(`${t.title} — press Tab to return to the car`, 3500); }
 
@@ -229,9 +232,9 @@ export default async function ({ THREE, scene, camera, meta, H, drive }) {
     ui.turn.classList.toggle('on', !!route && driving && !open);
     // minimap
     if (driving && !open && c && (miniT -= dt) <= 0) {
-      miniT = 1 / 30; const target = 0.6 + c.speed * 0.034; miniMpp += (target - miniMpp) * 0.12; const rot = c.heading - Math.PI;
+      miniT = 1 / MINI_HZ; const target = 0.6 + c.speed * 0.034; miniMpp += (target - miniMpp) * 0.12; const rot = c.heading - Math.PI;
       mapper.draw(mctx, MINI, MINI, { cx: c.x, cz: c.z, mpp: miniMpp, rot }, { dpr: mc.dpr, anchorY: 0.62, route, routeFrom: route ? prog.idx : 0, car: c, pois: false, dest, search: null, players: drive.players });
-      if ((streetT -= 1 / 30) <= 0) { streetT = 0.5; ui.street.textContent = nav.streetAt(c.x, c.z, 40) || '—'; }
+      if ((streetT -= 1 / MINI_HZ) <= 0) { streetT = 0.5; ui.street.textContent = nav.streetAt(c.x, c.z, 40) || '—'; }
       ui.mini.firstElementChild.nextElementSibling.style.cssText = `left:${(122 + 106 * Math.sin(rot)).toFixed(1)}px;top:${(122 - 106 * Math.cos(rot)).toFixed(1)}px;transform:translate(-50%,-50%)`;
     }
     // full map

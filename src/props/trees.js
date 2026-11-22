@@ -21,7 +21,7 @@ function patchFoliage(mat, { flutter = 1, warm = 1, sway = true, swayK = 0.00085
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         ${sway ? `{
           vec3 ip = vec3(instanceMatrix[3][0], 0.0, instanceMatrix[3][2]);
-          float hgt = max(transformed.y, 0.0);
+          float hgt = clamp(transformed.y, 0.0, 24.0);   // model-space metres (instance scale is applied after): bounded so the sway can never fling a vertex
           float w = hgt * hgt * ${swayK.toFixed(5)};
           float ph = ip.x * 0.31 + ip.z * 0.27;
           float gust = 0.6 + 0.4 * sin(uTime * 0.37 + ip.x * 0.011 + ip.z * 0.008);

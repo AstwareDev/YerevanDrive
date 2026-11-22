@@ -10,7 +10,7 @@ const FULL = quality.level !== 'low';    // low: one albedo+normal+ORM fetch per
 
 // Shared uniforms (aerial photo + baked building-contact AO, both in world XZ, north-up)
 const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); white.needsUpdate = true;
-export const shared = { uAerial: { value: white }, uAO: { value: white }, uWet: wetness, uDay: { value: 0 }, uAerialHi: { value: white } };
+export const shared = { uAerial: { value: white }, uAO: { value: white }, uWet: wetness, uDay: { value: 0 }, uAerialHi: { value: white }, uHiOn: { value: 0 } };
 const HI = 500; // half-extent (m) of aerial_hi.webp
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -18,7 +18,7 @@ const HI = 500; // half-extent (m) of aerial_hi.webp
 // uS0 = 1 / metres per tile, uAv0 = linear mean albedo); uA1.. = secondary set. The procedural look stays in place until uOn0 flips to 1.
 const COMMON = /* glsl */`
 varying vec3 vWP; varying vec2 vPUv; varying vec3 vWN;
-uniform sampler2D uPud; uniform sampler2D uAerial; uniform sampler2D uAO; uniform sampler2D uAerialHi; uniform float uWet; uniform float uDay;
+uniform sampler2D uPud; uniform sampler2D uAerial; uniform sampler2D uAO; uniform sampler2D uAerialHi; uniform float uHiOn; uniform float uWet; uniform float uDay;
 uniform sampler2D uA0; uniform sampler2D uN0; uniform sampler2D uO0; uniform float uOn0; uniform float uS0; uniform vec3 uAv0;
 uniform sampler2D uA1; uniform sampler2D uN1; uniform sampler2D uO1; uniform float uOn1; uniform float uS1; uniform vec3 uAv1;
 uniform sampler2D uRF; uniform float uRFon; uniform sampler2D uMask; uniform float uMaskOn;
@@ -58,7 +58,7 @@ function groundFrag(kind, c) {
   const needPud = hasWet || kind === 'asphalt';
   const aerialBlock = aerial > 0 ? `
         vec3 aerC = vec3(1.0);
-        { vec3 aer = texture2D(uAerial, wuv).rgb; vec2 hq = vec2(vWP.x, -vWP.z) / ${HI}.0 * 0.5 + 0.5; float hm = smoothstep(0.0, 0.06, min(min(hq.x, 1.0 - hq.x), min(hq.y, 1.0 - hq.y))); if (hm > 0.0) aer = mix(aer, texture2D(uAerialHi, hq).rgb, hm); aerC = aer; }
+        { vec3 aer = texture2D(uAerial, wuv).rgb; vec2 hq = vec2(vWP.x, -vWP.z) / ${HI}.0 * 0.5 + 0.5; float hm = smoothstep(0.0, 0.06, min(min(hq.x, 1.0 - hq.x), min(hq.y, 1.0 - hq.y))) * uHiOn; if (hm > 0.0) aer = mix(aer, texture2D(uAerialHi, hq).rgb, hm); aerC = aer; }
         float aerG = mix(${f1(c.gain ?? 0.8)}, 0.62, uDay);
         float dl = dot(diffuseColor.rgb, vec3(0.333));
         diffuseColor.rgb = mix(diffuseColor.rgb, aerC * aerG * (0.45 + dl * 1.9), ${f1(aerial)});` : '';
@@ -119,7 +119,8 @@ function groundFrag(kind, c) {
       albedo += `
           pA *= 0.84 + 0.32 * pud;`;
       if (c.roadDecals) decals = `
-          if (uRFon > 0.5) {
+          float dfade = 1.0 - smoothstep(90.0, 170.0, pdist);
+          if (uRFon > 0.5 && dfade > 0.0) {
             vec4 rf = texture2D(uRF, wuv);
             float hw = max(rf.a * 16.0, 0.5), latN = (rf.b - 0.5) * 2.0;
             float onRoad = step(0.02, rf.a) * (1.0 - smoothstep(0.88, 1.0, abs(latN)));
@@ -130,21 +131,21 @@ function groundFrag(kind, c) {
             float lc = (fract((lat + hw) / laneW) - 0.5) * laneW;
             float wob = 0.12 * sin(along * 0.31 + across * 0.2) + 0.07 * sin(along * 0.97 + 1.7);
             float q = (abs(lc) - 0.82 + wob) / 0.24;
-            float wheel = exp(-q * q) * smoothstep(2.3, 3.1, laneW) * onRoad * conf;
-            float oil = exp(-(lc / 0.16) * (lc / 0.16)) * onRoad * conf;
+            float wheel = exp(-q * q) * smoothstep(2.3, 3.1, laneW) * onRoad * conf * dfade;
+            float oil = exp(-(lc / 0.16) * (lc / 0.16)) * onRoad * conf * dfade;
             vec3 mk = vec3(0.0);
-            if (uMaskOn > 0.5) { vec2 mg = vec2(1.0 / 6.0); mk = textureGrad(uMask, vec2(across, along) / 6.0, dFdx(vWP.xz) * mg, dFdy(vWP.xz) * mg).rgb; }
+            if (uMaskOn > 0.5) { vec2 mg = vec2(1.0 / 6.0); mk = textureGrad(uMask, vec2(across, along) / 6.0, dFdxWP * mg, dFdyWP * mg).rgb; }
             float rub = mk.r * wheel;
-            float crack = mk.g * (1.0 - smoothstep(0.2, 0.33, pud));
-            float stain = mk.b * (0.3 + 0.7 * wheel + 0.6 * oil);
-            float edge = smoothstep(0.72, 0.95, abs(latN)) * step(0.02, rf.a);
+            float crack = mk.g * (1.0 - smoothstep(0.2, 0.33, pud)) * dfade;
+            float stain = mk.b * (0.3 + 0.7 * wheel + 0.6 * oil) * dfade;
+            float edge = smoothstep(0.72, 0.95, abs(latN)) * step(0.02, rf.a) * dfade;
             pA *= 1.0 - 0.2 * wheel - 0.5 * rub - 0.6 * crack - 0.42 * stain;
             pA = mix(pA, pA * 0.5 + vec3(0.05, 0.045, 0.04), edge * 0.8);
             pRM *= 1.0 - (0.22 * wheel + 0.32 * rub) * (0.45 + 0.55 * uWet) - 0.5 * stain;
             pRM = mix(pRM, 1.2, edge * 0.6);
             pHgt = -crack * 1.0 + rub * 0.15;
             ${c.manhole ? `
-            if (uMhOn > 0.5) {
+            if (uMhOn > 0.5 && pdist < 60.0) {
               vec2 cell = floor(vWP.xz / 24.0);
               vec3 h3 = fract(vec3(cell.xyx) * vec3(0.1031, 0.1030, 0.0973)); h3 += dot(h3, h3.yzx + 33.33); vec2 hh = fract((h3.xx + h3.yz) * h3.zy);
               vec2 cc = (cell + 0.12 + 0.76 * hh) * 24.0, dd = vWP.xz - cc;
@@ -177,7 +178,7 @@ function groundFrag(kind, c) {
         ${aerialBlock}
         vec2 puv = ${uv};
         float pHgt = 0.0, mhOp = 0.0; vec2 mhRN = vec2(0.0);
-        ${kind === 'asphalt' && c.manhole && c.roadDecals ? 'vec2 dFdxWP = dFdx(vWP.xz), dFdyWP = dFdy(vWP.xz);' : ''}
+        ${kind === 'asphalt' && c.roadDecals ? 'vec2 dFdxWP = dFdx(vWP.xz), dFdyWP = dFdy(vWP.xz);' : ''}
         vec3 pbrOut = diffuseColor.rgb;
         if (uOn0 > 0.5) {
           vec3 pA = texture2D(uA0, puv).rgb; pO = texture2D(uO0, puv);
@@ -280,7 +281,7 @@ function surface(mat, kind, puddle, c = {}) {
   if (c.roadDecals) pbr.wantMask = true;
   const gen = kind === 'mark' ? markFrag(c) : ['facade', 'shop', 'wall', 'metal'].includes(kind) ? wallFrag(kind, c) : groundFrag(kind, c);
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, { uPud: { value: puddle }, uWet: shared.uWet, uAerial: shared.uAerial, uAO: shared.uAO, uDay: shared.uDay, uAerialHi: shared.uAerialHi });
+    Object.assign(sh.uniforms, { uPud: { value: puddle }, uWet: shared.uWet, uAerial: shared.uAerial, uAO: shared.uAO, uDay: shared.uDay, uAerialHi: shared.uAerialHi, uHiOn: shared.uHiOn });
     if (s0) Object.assign(sh.uniforms, { uA0: s0.albedo, uN0: s0.normal, uO0: s0.orm, uOn0: s0.on, uS0: s0.inv, uAv0: s0.avg });
     else Object.assign(sh.uniforms, { uOn0: { value: 0 } });
     if (s1) Object.assign(sh.uniforms, { uA1: s1.albedo, uN1: s1.normal, uO1: s1.orm, uOn1: s1.on, uS1: s1.inv, uAv1: s1.avg });
@@ -299,10 +300,17 @@ function surface(mat, kind, puddle, c = {}) {
   return mat;
 }
 
+/** URL of a photo layer at the size the preset wants (4096 = the original file, 2048 = the half-resolution .2k variant from tools/make-lowres.mjs) */
+export const photoUrl = (name, size) => size >= 4096 ? `/map/${name}.webp` : `/map/${name}.2k.webp`;
 export function loadAerial(renderer) {
-  const aniso = renderer.capabilities.getMaxAnisotropy();
-  new THREE.TextureLoader().load('/map/aerial.webp', t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true; shared.uAerial.value = t; }, undefined, () => console.warn('aerial.webp missing'));
-  new THREE.TextureLoader().load('/map/aerial_hi.webp', t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true; shared.uAerialHi.value = t; }, undefined, () => console.warn('aerial_hi.webp missing'));
+  const aniso = Math.min(quality.anisotropy, renderer.capabilities.getMaxAnisotropy()), A = quality.aerial;
+  const load = (name, size, apply) => new THREE.ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' }).load(photoUrl(name, size), bm => {
+    // decoded off the main thread; a 2048^2 map is one quarter of the VRAM and upload time of the 4096^2 original
+    const t = new THREE.Texture(bm); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true;
+    t.onUpdate = () => { try { bm.close(); } catch { /* ignore */ } t.onUpdate = null; }; apply(t);
+  }, undefined, () => console.warn(name + ' missing'));
+  load('aerial', A.near, t => { shared.uAerial.value = t; });
+  if (A.hi) load('aerial_hi', A.hi, t => { shared.uAerialHi.value = t; shared.uHiOn.value = 1; });
   new THREE.TextureLoader().load('/map/ao.png', t => { t.colorSpace = THREE.NoColorSpace; t.anisotropy = 4; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; shared.uAO.value = t; }, undefined, () => console.warn('ao.png missing'));
 }
 

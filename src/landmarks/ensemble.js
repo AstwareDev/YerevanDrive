@@ -16,7 +16,7 @@ export function buildEnsemble(m, fp, hidden) {
   {
     const front = [{ h: 6.2, kind: 'arch', pier: 1.7, vs: 4.0 }, { h: 4.8, kind: 'loggia', cols: 2 }, { h: 4.0, kind: 'win', ww: 1.5, wh: 2.2, sill: 0.8, ped: 'seg' }];
     const side = [{ h: 5.2, kind: 'win', ww: 1.5, wh: 2.7, sill: 0.9, ped: (k) => k % 2 ? 'tri' : 'seg' }, { h: 4.7, kind: 'win', ww: 1.5, wh: 2.4, sill: 0.9, ped: 'seg' }, { h: 4.1, kind: 'win', ww: 1.4, wh: 2.0, sill: 0.8 }];
-    const common = { wall: 'rose', trim: 'rose', tint: [1, 0.96, 0.94], plinth: 1.4, pilasters: { from: 1, to: 2, w: 0.7, proj: 0.2 }, cornice: { fh: 1.0 }, roof: { kind: 'hip', rise: 5.5, inset: 5.5, col: [1, 1, 1] }, bayW: 5.2, hidden, strings: [1] };
+    const common = { wall: 'rose', trim: 'rose', tint: [1, 0.96, 0.94], plinth: 1.4, pilasters: { from: 1, to: 2, w: 0.7, proj: 0.2 }, cornice: { fh: 1.0 }, roof: { kind: 'hip', rise: 5.5, inset: 5.5, col: [1, 1, 1], mat: 'zinc' }, bayW: 5.2, hidden, strings: [1] };
     // west wing: curved main front on the square
     out.gov1 = building(m, ringOf(31664493), { ...common, ...W(side), selfId: 31664493, seed: 11, edge: (i, a, b, L) => facing(a, b, SQ, 0.3) && L > 3 ? { floors: front } : undefined, lit: 0.1 });
     out.gov2 = building(m, ringOf(482593803), { ...common, ...W(side), selfId: 482593803, seed: 12, lit: 0.12 });
@@ -48,8 +48,8 @@ export function buildEnsemble(m, fp, hidden) {
   {
     const fr = [{ h: 5.2, kind: 'arch', pier: 1.3, vs: 3.5 }, { h: 3.9, kind: 'win', ww: 1.4, wh: 2.4, sill: 0.8, ped: 'seg', balc: (k) => k % 2 === 0 }, { h: 3.9, kind: 'win', ww: 1.4, wh: 2.4, sill: 0.8 }, { h: 3.9, kind: 'win', ww: 1.4, wh: 2.4, sill: 0.8, balc: (k) => k % 2 === 1 }, { h: 3.9, kind: 'win', ww: 1.4, wh: 2.4, sill: 0.8 }, { h: 3.5, kind: 'win', ww: 1.3, wh: 2.0, sill: 0.7 }];
     const bk = fr.map((f, i) => i === 0 ? { h: 5.2, kind: 'win', ww: 1.4, wh: 2.6, sill: 0.9 } : { ...f, ped: undefined, balc: undefined });
-    out.marriott = building(m, ringOf(31854855), { wall: 'rose', trim: 'rose', tint: [1.06, 0.97, 0.92], plinth: 1.3, ...W(bk), pilasters: { from: 1, to: 5, w: 0.6, proj: 0.16 }, cornice: { fh: 1.0 }, balustrade: true, roof: { kind: 'flat' }, bayW: 4.4, hidden, selfId: 31854855, seed: 41, lit: 0.22, strings: [1, 5], edge: (i, a, b, L) => facing(a, b, SQ, 0.3) && L > 3 ? { floors: fr } : undefined });
-    out.marriott2 = building(m, ringOf(1299235223), { wall: 'rose', trim: 'rose', plinth: 1.3, ...W(bk.slice(0, 4)), cornice: { fh: 1.0 }, balustrade: true, roof: { kind: 'flat' }, bayW: 4.4, hidden, selfId: 1299235223, seed: 42, lit: 0.2 });
+    out.marriott = building(m, ringOf(31854855), { wall: 'pink', trim: 'pink', tint: [1.06, 0.97, 0.92], plinth: 1.3, ...W(bk), pilasters: { from: 1, to: 5, w: 0.6, proj: 0.16 }, cornice: { fh: 1.0 }, balustrade: true, roof: { kind: 'flat' }, bayW: 4.4, hidden, selfId: 31854855, seed: 41, lit: 0.22, strings: [1, 5], edge: (i, a, b, L) => facing(a, b, SQ, 0.3) && L > 3 ? { floors: fr } : undefined });
+    out.marriott2 = building(m, ringOf(1299235223), { wall: 'pink', trim: 'pink', plinth: 1.3, ...W(bk.slice(0, 4)), cornice: { fh: 1.0 }, balustrade: true, roof: { kind: 'flat' }, bayW: 4.4, hidden, selfId: 1299235223, seed: 42, lit: 0.2 });
   }
 
   // ============================================================ Post / Communications (Trade Unions building), south of the oval
@@ -114,6 +114,26 @@ function portico(m, P, t, hL) {
   m.fq('cream', F, [[-15.9, yp, 7.5], [0, yp + ph, 7.5], [0, yp + ph, 3.6], [-15.9, yp, 3.6]], [-ph, 15.9, 0], { col: [1.05, 1.03, 1] });
   m.fq('cream', F, [[0, yp + ph, 7.5], [15.9, yp, 7.5], [15.9, yp, 3.6], [0, yp + ph, 3.6]], [ph, 15.9, 0], { col: [1.05, 1.03, 1] });
   m.fq('cream', F, [[-15.9, yp, 3.6], [0, yp + ph, 3.6], [15.9, yp, 3.6]], [0, 0, -1], { col: [0.9, 0.88, 0.85] });
+  // dentils under the pediment cornice, tympanum relief panel, acroteria
+  for (let i = 0; i < 52; i++) { const a = -15.4 + i * 0.6; m.fbox('cream', F, a, a + 0.32, yE + 0.7, yE + 1.05, 7.0, 7.22, { skip: 'b', col: [1.02, 1.0, 0.96] }); }
+  m.fq('frame', F, [[-12.6, yp + 0.55, 7.54], [12.6, yp + 0.55, 7.54], [0.0, yp + ph - 0.55, 7.54]], [0, 0, 1], { col: [0.6, 0.5, 0.38] });
+  for (let i = 0; i < 9; i++) { const a = -8 + i * 2, hh = 0.9 + 0.8 * (1 - Math.abs(a) / 9); m.fbox('cream', F, a - 0.35, a + 0.35, yp + 0.6, yp + 0.6 + hh, 7.5, 7.75, { skip: 'b', col: [1.1, 1.07, 1.0] }); }
+  for (const [a, h] of [[-15.4, 1.4], [15.4, 1.4], [0, 1.8]]) m.fbox('cream', F, a - 0.7, a + 0.7, a === 0 ? yp + ph : yp, (a === 0 ? yp + ph : yp) + h, 3.9, 5.2, { skip: 'b', col: [1.1, 1.07, 1.02] });
+  // attic block rising behind the pediment: arched banner niche, two oculi, balustrade cornice
+  const yA = yE + 1.5, hA = 10.5, ft = 0.26;
+  m.fbox('cream', F, -13.5, 13.5, yA - 1.2, yA + hA, -4.0, 0.25, { skip: 'b', col: [1.04, 1.02, 0.98] });
+  m.fbox('cream', F, -14.0, 14.0, yA + hA, yA + hA + 0.9, -4.2, 0.9, { skip: 'b', col: [1.1, 1.07, 1.02] });
+  for (let i = 0; i < 36; i++) { const a = -13.8 + i * 0.77; m.fbox('cream', F, a, a + 0.28, yA + hA + 0.9, yA + hA + 1.9, 0.1, 0.4, { skip: 'b', col: [1.08, 1.05, 1] }); }
+  m.fbox('cream', F, -14.0, 14.0, yA + hA + 1.9, yA + hA + 2.2, -0.1, 0.55, { skip: 'b', col: [1.1, 1.07, 1.02] });
+  const arch = (a, v0, w, h, col, d, depthName = 'frame') => { const pts = [[a - w, v0, d], [a + w, v0, d]]; for (let k = 0; k <= 10; k++) { const t = Math.PI * k / 10; pts.push([a + Math.cos(t) * w, v0 + h + Math.sin(t) * w, d]); } m.fq(depthName, F, pts, [0, 0, 1], { col }); };
+  arch(0, yA + 4.6, 3.6, 2.6, [0.46, 0.36, 0.26], 0.3);                       // central recess
+  arch(0, yA + 4.6, 4.3, 2.6, [1.12, 1.09, 1.03], 0.27, 'cream');            // archivolt frame behind the recess
+  m.fbox('cream', F, -3.9, -3.6, yA + 4.6, yA + 7.3, 0.25, 0.4, { skip: 'b' }); m.fbox('cream', F, 3.6, 3.9, yA + 4.6, yA + 7.3, 0.25, 0.4, { skip: 'b' });
+  for (const sg of [-1, 1]) {
+    const a = sg * 9.0, R = 1.7, yc = yA + 6.4, pts = []; for (let k = 0; k < 20; k++) { const t = TAU * k / 20; pts.push([a + Math.cos(t) * R, yc + Math.sin(t) * R, 0.31]); }
+    const ring = []; for (let k = 0; k < 20; k++) { const t = TAU * k / 20; ring.push([a + Math.cos(t) * (R + 0.45), yc + Math.sin(t) * (R + 0.45), 0.28]); }
+    m.fq('cream', F, ring, [0, 0, 1], { col: [1.12, 1.09, 1.03] }); m.fq('frame', F, pts, [0, 0, 1], { col: [0.42, 0.33, 0.24] });
+  }
   // light fixtures on the steps
   for (let i = 0; i < 5; i++) { const a = -14 + i * 7; m.fbox('lamp', F, a - 0.3, a + 0.3, y0 + 0.1, y0 + 0.3, 13.2, 13.7, { col: [3.6, 2.3, 1.1] }); }
 }

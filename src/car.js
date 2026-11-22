@@ -5,6 +5,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { quality } from './quality.js';
+import { fetchJSON } from './net.js';
 import { createGround } from './car/ground.js';
 import { createColliders } from './car/colliders.js';
 import { Vehicle, CAR, applyProfile } from './car/vehicle.js';
@@ -25,7 +26,7 @@ export default async function car(ctx) {
   await RAPIER.init();
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 }); world.timestep = DT;
   const ground = await createGround(H);
-  const circuitsData = await (await fetch('/map/circuits.json')).json().catch(() => []);      // used for a road spawn point; barriers only when the circuits are on
+  const circuitsData = await fetchJSON('/map/circuits.json').catch(() => []);      // used for a road spawn point; barriers only when the circuits are on
   const circuitsOn = new URLSearchParams(location.search).get('circuits') === '1';
   const colliders = await createColliders({ RAPIER, world, ground, meta, circuits: circuitsOn ? circuitsData : [] });
   const qs = new URLSearchParams(location.search), LSget = k => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -118,7 +119,7 @@ export default async function car(ctx) {
   { const o = Math.random() * 16; spawn = { ...spawn, x: spawn.x - Math.sin(spawn.heading) * o, z: spawn.z - Math.cos(spawn.heading) * o }; }      // multiplayer: stagger the start so tabs don't spawn on top of each other
   const places = [{ name: 'Republic Square', x: spawn.x, z: spawn.z, heading: spawn.heading }, ...(meta.places ?? [])]; let placeIdx = 0;
   let safe = { x: spawn.x, z: spawn.z, y: spawn.y ?? null, heading: spawn.heading }, safeT = 0;
-  function respawn(to = safe) { vehicle.reset(to.x, to.z, to.heading, to.y); colliders.prime(to.x, to.z); input.reset(); cam.reset(); skidsClear(); hud.resetScore(); }
+  function respawn(to = safe) { drive.prefetch?.(to.x, to.z); vehicle.reset(to.x, to.z, to.heading, to.y); colliders.prime(to.x, to.z); input.reset(); cam.reset(); skidsClear(); hud.resetScore(); }
   const skidsClear = () => { smoke.clear(); };
   vehicle.reset(spawn.x, spawn.z, spawn.heading, spawn.y);
   colliders.prime(spawn.x, spawn.z);

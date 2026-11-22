@@ -1,6 +1,7 @@
 // Materials for the far / low-LOD world tiles: terrain with a 3-layer aerial cascade, simplified buildings with procedural windows,
 // simple roads. At night, distant districts glow (road lights + lit windows) *through* the fog so the horizon never looks empty.
 import * as THREE from 'three';
+import { quality } from '../quality.js';
 
 const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); white.needsUpdate = true;
 export const farShared = { uMid: { value: white }, uFar: { value: white }, uLights: { value: white } };
@@ -37,7 +38,7 @@ function patch(mat, shared, fragBody, kind) {
 export function createFarMaterials(shared, renderer) {
   const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const load = (url, target, srgb = true) => new THREE.TextureLoader().load(url, t => { t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true; target.value = t; }, undefined, () => console.warn('missing', url));
-  load('/map/aerial_mid.webp', farShared.uMid); load('/map/aerial_far.webp', farShared.uFar); load('/map/lights_far.webp', farShared.uLights, false);
+  load(quality.aerial.mid >= 4096 ? '/map/aerial_mid.webp' : '/map/aerial_mid.2k.webp', farShared.uMid); load('/map/aerial_far.webp', farShared.uFar); load('/map/lights_far.webp', farShared.uLights, false);
   const F = {};
 
   // ---- terrain: aerial cascade + night city lights (R = road glow, G = building coverage; +-4400 m)

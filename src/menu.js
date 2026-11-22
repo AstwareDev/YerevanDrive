@@ -249,8 +249,9 @@ export default async function ({ THREE, camera, drive }) {
     const qNow = SET.q ?? 'auto';
     $('set-rows').innerHTML = `
       <div class="row"><label>Nickname<small>Shown above your car</small></label><input id="st-nick" maxlength="16" value="${esc(nickname)}" spellcheck="false" autocomplete="off"></div>
-      <div class="row"><label>Graphics<small>Reloads the game · now: ${esc(quality())}</small></label>${seg('st-q', [['auto', 'Auto'], ['low', 'Low'], ['med', 'Med'], ['high', 'High'], ['ultra', 'Ultra']], qNow)}</div>
+      <div class="row"><label>Graphics<small>Reloads the game · now: ${esc(quality())}${Y()?.quality.capped ? ' (lowered after a crash: pick a level to lift it)' : ''}</small></label>${seg('st-q', [['auto', 'Auto'], ['low', 'Low'], ['med', 'Med'], ['high', 'High'], ['ultra', 'Ultra']], qNow)}</div>
       <div class="row"><label>Textures<small>Reloads the game · independent of Graphics</small></label>${seg('st-tex', [['auto', 'Auto'], [512, '512'], [1024, '1K'], [2048, '2K']], SET.tex ?? 'auto')}</div>
+      <div class="row"><label>Auto quality<small>Lowers quality while playing when fps drops (can cause a stutter when it switches). Reloads the game.</small></label>${seg('st-gov', [[0, 'Off'], [1, 'On']], LS.get('yd.gov', '0'))}</div>
       <div class="row"><label>FPS counter</label>${seg('st-fps', [[1, 'On'], [0, 'Off']], SET.fps ?? 1)}</div>
       <div class="row"><label>Bloom</label>${seg('st-bloom', [[1, 'On'], [0, 'Off']], SET.bloom ?? (Y()?.bloom.enabled ? 1 : 0))}</div>
       <div class="row"><label>Time of day</label>${seg('st-tod', [[0, 'Night'], [0.5, 'Dusk'], [1, 'Day']], SET.tod ?? 0)}</div>
@@ -258,9 +259,10 @@ export default async function ({ THREE, camera, drive }) {
       <div class="row"><label>Sound</label>${seg('st-sound', [[1, 'On'], [0, 'Off']], SET.sound ?? 1)}</div>`;
     const bind = (id, fn) => [...$(id).children].forEach(n => n.onclick = () => { fn(n.dataset.v); renderSettings(); });
     bind('st-fps', v => setSetting('fps', v));
+    bind('st-gov', v => { LS.set('yd.gov', v); location.reload(); });
     bind('st-tex', v => { if (v === 'auto') { try { localStorage.removeItem('yd.tex'); } catch { /* */ } } else LS.set('yd.tex', v); const u = new URL(location.href); u.searchParams.delete('tex'); location.href = u.toString(); });
     bind('st-bloom', v => setSetting('bloom', v)); bind('st-tod', v => setSetting('tod', v)); bind('st-wet', v => setSetting('wet', v)); bind('st-sound', v => setSetting('sound', v));
-    bind('st-q', v => { if (v === 'auto') { try { localStorage.removeItem('yd.q'); } catch { /* */ } } else LS.set('yd.q', v); const u = new URL(location.href); u.searchParams.delete('q'); location.href = u.toString(); });
+    bind('st-q', v => { try { localStorage.removeItem('yd.cap'); } catch { /* */ } if (v === 'auto') { try { localStorage.removeItem('yd.q'); } catch { /* */ } } else LS.set('yd.q', v); const u = new URL(location.href); u.searchParams.delete('q'); location.href = u.toString(); });
     const inp = $('st-nick'); const commit = () => { const n = inp.value.trim(); if (nameOk(n)) { nickname = n; drive.mp?.setName(n); } else inp.value = nickname; };
     inp.onchange = commit; inp.onblur = commit;
   }

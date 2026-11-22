@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { buildOrnateLamps } from './landmarks/ornate_lamp.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -6,7 +8,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { createMaterials, wetness, shared } from './materials.js';
 import { createSky } from './sky.js';
 import { loadHeight } from './height.js';
-import { quality } from './quality.js';
+import { quality, renderScale, bootStart, bootDone } from './quality.js';
+import { fetchJSON, warmStartup } from './net.js';
 import { Streamer } from './world/streamer.js';
 import { SceneFXPass } from './post/scenefx.js';
 import { FinalPass } from './post/final.js';
@@ -16,6 +19,8 @@ import { createGovernor } from './perf.js';
 import { createFarMaterials } from './world/farMaterials.js';
 
 const $ = id => document.getElementById(id);
+bootStart();          // crash flag: cleared once the loading screen is gone (quality.js lowers the next start if the browser died in between)
+warmStartup();        // start every start-up download now, in parallel, before any code needs it
 // exp fog (instead of three's exp2) keeps the far horizon readable: 1 km ~ 50% haze at night, 5 km ~ 98%
 // + exponential HEIGHT fog: density falls off with altitude (scale height ~240 m above Republic Square), integrated analytically along
 // the view ray. The haze pools in the valley around the Square, looking down from Komitas / Arabkir (+160 m) gets the layered depth.
@@ -37,6 +42,16 @@ renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = quality.shadows;
 renderer.shadowMap.type = THREE.PCFShadowMap;            // (PCFSoft was removed in r18x; PCF + shadow.radius is the soft path now)
 document.body.prepend(renderer.domElement);
+// GPU reset / out of VRAM: the page used to just go black. Drop one preset tier and reload (once per 60 s, so a broken driver cannot loop).
+renderer.domElement.addEventListener('webglcontextlost', e => {
+  e.preventDefault();
+  try {
+    const last = +(localStorage.getItem('yd.lostT') ?? 0); if (Date.now() - last < 60000) return;
+    localStorage.setItem('yd.lostT', String(Date.now()));
+    const order = ['low', 'med', 'high', 'ultra'], i = Math.max(0, order.indexOf(quality.level) - 1); localStorage.setItem('yd.cap', order[i]);
+  } catch { /* ignore */ }
+  setTimeout(() => location.reload(), 400);
+});
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(FOG, FOG_NIGHT);
@@ -81,10 +96,11 @@ const composer = new EffectComposer(renderer, rt);
 composer.addPass(new RenderPass(scene, camera));
 // pass chain: Render -> SceneFX (AO + RT/SSR reflections + traced far shadows + in-scatter + NaN guard, inserted below once the height grid
 // is loaded) -> Bloom -> Final (tone map + grade). The old separate NaN-guard and Output passes are folded into SceneFX / Final.
-const depthTex = new THREE.DepthTexture(innerWidth, innerHeight); depthTex.type = THREE.UnsignedIntType;
-composer.renderTarget2.depthTexture = depthTex;          // RenderPass renders into renderTarget2: SSR reads colour + depth from it
+const depthTex = quality.fx ? new THREE.DepthTexture(innerWidth, innerHeight) : null; if (depthTex) depthTex.type = THREE.UnsignedIntType;
+if (depthTex) composer.renderTarget2.depthTexture = depthTex;          // RenderPass renders into renderTarget2: SSR reads colour + depth from it
 let sceneFx = null;                                       // created once the height grid is loaded (below)
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.5, 1.05);
+bloom.enabled = !!quality.bloom;
 composer.addPass(bloom);
 const finalPass = new FinalPass(quality); composer.addPass(finalPass);
 
@@ -92,18 +108,20 @@ const finalPass = new FinalPass(quality); composer.addPass(finalPass);
 const { M, T } = createMaterials(renderer);
 const progress = (txt, p) => { $('loadtxt').textContent = txt; $('loadbar').style.width = (p * 100).toFixed(0) + '%'; $('loadpct').textContent = (p * 100).toFixed(0) + '%'; };
 progress('Loading metadata…', 0.02);
-const meta = await (await fetch('/map/meta.json')).json();
+const meta = await fetchJSON('/map/meta.json');
 // fallbacks for materials introduced by the generator (the PBR pass may define better ones in materials.js)
 M.pavement ??= new THREE.MeshStandardMaterial({ map: T.plaza, roughness: 0.78, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 M.curb ??= M.wall;
 M.trim ??= M.wall;     // window sills / lintels / balconies: separate mesh so the low preset can drop it
-const manifest = await (await fetch('/tiles/manifest.json')).json();
+const manifest = await fetchJSON('/tiles/manifest.json');
 const FM = createFarMaterials(shared, renderer);
 const streamer = new Streamer({
   scene, manifest, quality, materials: { ...M, ...FM },
   onMesh(o, name, level) { if (name === 'trim' && quality.level === 'low') o.visible = false; o.castShadow = level === 0 && !/^(asphalt|sidewalk|plaza|grass|dirt|water|mark_|crossing|neon|terrain)/.test(name); o.receiveShadow = level === 0 && name !== 'neon'; },
 });
 camera.position.set(70, 38, 150);
+const heightP = loadHeight();       // 9 MB: downloads while the first tiles stream (it used to start only after them)
+heightP.catch(() => { });
 await streamer.preload(camera.position, p => progress('Streaming world tiles…', 0.1 + 0.8 * p));
 progress('Building scene…', 0.92);
 
@@ -123,15 +141,20 @@ const tod = { day: 0, night: 1 };   // shared with plugins: read tod.night (0..1
   const poolMat = new THREE.MeshBasicMaterial({ map: T.glow, color: new THREE.Color(1.0, 0.62, 0.3).multiplyScalar(0.32), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
   fx.push({ color: poolMat.color, base: poolMat.color.clone(), floor: 0 });
   const pool = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), poolMat, n);
+  const ornate = [];   // lamps on Republic Square itself are drawn as the cast-iron multi-globe lamps instead (src/landmarks/ornate_lamp.js)
   for (let i = 0; i < n; i++) {
-    const [x, y, z, dx, dz, big] = meta.lamps.slice(i * 6, i * 6 + 6), h = big ? 9 : 6.6, th = Math.atan2(-dz, dx);
-    dummy.position.set(x, y, z); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, h, 1); dummy.updateMatrix(); pole.setMatrixAt(i, dummy.matrix);
-    dummy.position.set(x + dx * 0.9, y + h, z + dz * 0.9); dummy.rotation.set(0, th, 0); dummy.scale.set(1.8, 1, 1); dummy.updateMatrix(); arm.setMatrixAt(i, dummy.matrix);
-    dummy.position.set(x + dx * 1.8, y + h - 0.05, z + dz * 1.8); dummy.rotation.set(0, th, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); head.setMatrixAt(i, dummy.matrix);
+    const [x, y, z, dx, dz, big] = meta.lamps.slice(i * 6, i * 6 + 6), h = big ? 9 : 6.6, th = Math.atan2(-dz, dx), onSquare = Math.abs(x - 40) < 105 && Math.abs(z + 45) < 90;
+    if (onSquare) ornate.push([x, y, z]);
+    const k = onSquare ? 1e-4 : 1;
+    dummy.position.set(x, y, z); dummy.rotation.set(0, 0, 0); dummy.scale.set(k, h * k, k); dummy.updateMatrix(); pole.setMatrixAt(i, dummy.matrix);
+    dummy.position.set(x + dx * 0.9, y + h, z + dz * 0.9); dummy.rotation.set(0, th, 0); dummy.scale.set(1.8 * k, k, k); dummy.updateMatrix(); arm.setMatrixAt(i, dummy.matrix);
+    dummy.position.set(x + dx * 1.8, y + h - 0.05, z + dz * 1.8); dummy.rotation.set(0, th, 0); dummy.scale.set(k, k, k); dummy.updateMatrix(); head.setMatrixAt(i, dummy.matrix);
     const R = big ? 24 : 17;
     dummy.position.set(x + dx * 2.4, y + 0.19, z + dz * 2.4); dummy.rotation.set(0, 0, 0); dummy.scale.set(R, 1, R); dummy.updateMatrix(); pool.setMatrixAt(i, dummy.matrix);
     lampHeads.push(new THREE.Vector3(x + dx * 1.8, y + h - 0.3, z + dz * 1.8));
   }
+  buildOrnateLamps(THREE, mergeGeometries, ornate, fx, scene);
+  console.log('[lamps] ornate Republic Square lamps:', ornate.length);
   {   // dense avenues (lamps every ~15 m, both sides) stack their additive glow pools and wash the whole road out: scale each pool by how many neighbours it overlaps
     const CELLG = 14, grid = new Map(), keyOf = (x, z) => Math.floor(x / CELLG) + ',' + Math.floor(z / CELLG), L = meta.lamps, col = new THREE.Color();
     for (let i = 0; i < n; i++) { const k = keyOf(L[i * 6], L[i * 6 + 2]); (grid.get(k) ?? grid.set(k, []).get(k)).push(i); }
@@ -159,20 +182,30 @@ const tod = { day: 0, night: 1 };   // shared with plugins: read tod.night (0..1
 }
 
 // ------------------------------------------------------------ plug-in modules (landmarks.js, props.js): each default-exports async (ctx) => ({ update?(dt, camera, time) })
-const heightAt = await loadHeight();
-sceneFx = new SceneFXPass({ camera, depthTexture: depthTex, heightGrid: heightAt.grid, wetness, quality }); composer.insertPass(sceneFx, 1);   // index 1 = straight after RenderPass: it must write to rt1, not to rt2 (whose depth texture it samples)
-if (sceneFx.rt) initRTWorld({ heightGrid: heightAt.grid }).catch(e => console.warn('rt world unavailable', e));   // background bake
-const pluginUpdates = [];
+const heightAt = await heightP;
+if (quality.fx) { sceneFx = new SceneFXPass({ camera, depthTexture: depthTex, heightGrid: heightAt.grid, wetness, quality }); composer.insertPass(sceneFx, 1); }   // index 1 = straight after RenderPass: it must write to rt1, not to rt2 (whose depth texture it samples)
+if (sceneFx?.rt) initRTWorld({ heightGrid: heightAt.grid }).catch(e => console.warn('rt world unavailable', e));   // background bake
+const pluginUpdates = [];       // { path, update }
 // shared with the car plug-in (src/car.js): drive mode takes over the camera, `focus` feeds the shadow frustum / lamp lights
 const drive = { active: false, wanted: false, uiLock: false, focus: new THREE.Vector3(), set(v) { setMode(v ? 'drive' : 'orbit'); } };
 {
   const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js', './mp.js', './menu.js', './orbeli.js']);
   const wantCircuits = new URLSearchParams(location.search).get('circuits') === '1';     // the race circuits are off by default: free roam (?circuits=1 restores them)
-  for (const [path, load] of Object.entries(found)) {
-    if (path.endsWith('circuits.js') && !wantCircuits) continue;
-    try { const mod = await load(); const api = await mod.default({ THREE, scene, renderer, camera, M, T, meta, H: heightAt, lampHeads, tod, drive }); if (api?.update) pluginUpdates.push(api.update); console.log('plugin loaded', path); }
+  // The plug-ins used to initialise one after the other (each one: import, download, parse, build). Their downloads and module loads now overlap:
+  // phase 1 = everything that does not need the car (world dressing + the big car module itself, 4 MB of WASM), phase 2 = what talks to the car.
+  const ctx = { THREE, scene, renderer, camera, M, T, meta, H: heightAt, lampHeads, tod, drive };
+  const run = async (path, load) => {
+    try { const mod = await load(); const api = await mod.default(ctx); if (api?.update) pluginUpdates.push({ path, update: api.update }); console.log('plugin loaded', path); }
     catch (e) { console.error('plugin failed', path, e); }
-  }
+  };
+  const entries = Object.entries(found).filter(([p]) => !(p.endsWith('circuits.js') && !wantCircuits));
+  const carDeps = /\/(menu|mp|nav)\.js$/, late = /\/nav\.js$/;
+  await Promise.all(entries.filter(([p]) => !carDeps.test(p)).map(([p, l]) => run(p, l)));
+  await Promise.all(entries.filter(([p]) => carDeps.test(p) && !late.test(p)).map(([p, l]) => run(p, l)));
+  // the map / GPS (1.4 MB graph + 18 k nodes to index) is not needed to start driving: it finishes behind the loading screen
+  for (const [p, l] of entries) if (late.test(p)) run(p, l);
+  // keep the historic update order (alphabetical by file) regardless of which plug-in finished first
+  pluginUpdates.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 // ------------------------------------------------------------ time of day (T toggles). 0 = night (default), 1 = day.
@@ -204,7 +237,7 @@ function applyTod(d) {
 }
 // real point lights recycled onto the nearest street lamps (specular streaks on wet asphalt, light on facades)
 // Light count is a per-pixel cost in every lit material, so it scales with the preset (the CPU side is a grid query, not a sort of every lamp).
-const POOL = { low: 6, med: 10 }[quality.level] ?? 14, lampLights = [];
+const POOL = quality.lights, lampLights = [];
 for (let i = 0; i < POOL; i++) { const l = new THREE.PointLight(0xffb36b, 0, 34, 2); scene.add(l); lampLights.push(l); }
 const focus = new THREE.Vector3();
 const LCELL = 48; let lampGrid = null, lampGridN = -1;
@@ -288,7 +321,9 @@ renderer.domElement.addEventListener('wheel', e => { if (mode === 'fly') flySpee
 let sizeW = 0, sizeH = 0;
 function fitSize() {
   const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight); if (w === sizeW && h === sizeH) return; sizeW = w; sizeH = h;
-  camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h); composer.setSize(w, h); bloom.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h); composer.setSize(w, h); const bs = { med: 0.5, high: 0.75 }[quality.level] ?? 1; bloom.setSize(w * bs, h * bs);
+  const pr = renderScale(w, h);       // pixel budget: a bigger window / monitor lowers the render scale instead of exploding the render-target memory
+  if (Math.abs(pr - quality.targetPR) > 1e-3) { quality.targetPR = pr; if (typeof governor !== 'undefined') governor.rebase(pr); else { renderer.setPixelRatio(pr); composer.setPixelRatio(pr); } }
 }
 
 if (drive.startMode) setMode(drive.startMode); else if (drive.wanted) setMode('drive');
@@ -302,14 +337,18 @@ const probe = quality.probe ? createProbe({ renderer, scene, quality, fallback: 
 // program between instanced / plain / batched objects (each flip = getParameters + getProgram on the CPU)
 const instDepth = new THREE.MeshDepthMaterial();
 function groupShadowPrograms() { scene.traverse(o => { if (o.isInstancedMesh && o.castShadow && !o.customDepthMaterial && !Array.isArray(o.material) && !o.material?.alphaTest) o.customDepthMaterial = instDepth; }); }
-groupShadowPrograms(); setInterval(groupShadowPrograms, 4000);
+groupShadowPrograms(); if (quality.shadows) setInterval(groupShadowPrograms, 4000);       // (a full scene traversal: pointless when nothing casts shadows)
 // compile every program before the loading screen goes away (async with KHR_parallel_shader_compile): no first-sight shader hitches
 progress('Compiling shaders…', 0.95);
 try { await Promise.race([renderer.compileAsync(scene, camera), new Promise(r => setTimeout(r, 20000))]); } catch (e) { console.warn('precompile', e); }
 $('loading').classList.add('done');
 progress('Ready', 1);
-let statT = 0;
-const governor = createGovernor({ renderer, composer, quality, bloom, fxPass: sceneFx, moon, basePixelRatio: quality.targetPR });
+let statT = 0, shadowTick = 0;
+bootDone();
+const governor = createGovernor({ renderer, composer, quality, bloom, fxPass: sceneFx, moon, probe, getBasePR: () => quality.targetPR, busy: () => streamer.busy });
+drive.prefetch = (x, z) => streamer.prefetch(x, z, heightAt(x, z) + 6);       // plug-ins (map, teleport) announce where the player is going
+const gpuName = (() => { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? String(gl.getParameter(e.UNMASKED_RENDERER_WEBGL)).replace(/ANGLE \(|\)|Direct3D.*|\(0x[0-9A-F]+\)/gi, '').replace(/NVIDIA,? |Corporation|,/g, '').trim() : '?'; })();
+let cpuMs = 8;
 const _fwd = new THREE.Vector3(), _keyCol = new THREE.Color(), _amb = new THREE.Color();
 const clock = new THREE.Clock(); let frames = 0, acc = 0, lastLamp = 0;
 // frame-time ring (last ~600 frames) for the stats line + window.__yerevan.bench(): avg fps and 1% low are what you feel, not the instant fps
@@ -320,24 +359,46 @@ renderer.info.autoReset = false; const frameInfo = { calls: 0, tris: 0 };
 window.__yerevan.benchReset = () => { ftN = 0; };
 window.__yerevan.passes = composer.passes; window.__yerevan.fx = sceneFx; window.__yerevan.composer = composer; window.__yerevan.probe = probe;
 window.__yerevan.fitForce = () => { composer.setPixelRatio(renderer.getPixelRatio()); sizeW = 0; fitSize(); };
-window.__yerevan.bench = () => ({ ...benchStats(), quality: quality.level, pixelRatio: renderer.getPixelRatio(), governorStep: governor.level, drawCalls: frameInfo.calls, triM: +(frameInfo.tris / 1e6).toFixed(2), textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries, programs: renderer.info.programs?.length, gpu: (() => { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })() });
+window.__yerevan.bench = () => ({ ...benchStats(), gpuName, governor: governor.status, cpuMs: +cpuMs.toFixed(1), quality: quality.level, pixelRatio: renderer.getPixelRatio(), governorStep: governor.level, drawCalls: frameInfo.calls, triM: +(frameInfo.tris / 1e6).toFixed(2), textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries, programs: renderer.info.programs?.length, gpu: (() => { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })() });
 // always-on-screen FPS counter (menu > FPS counter, default on): avg fps / 1% low / frame ms
 const fpsEl = document.createElement('div');
 fpsEl.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:50;font:600 12px/1.3 ui-monospace,Consolas,monospace;color:#fff;background:rgba(0,0,0,.55);padding:4px 8px;border:1px solid rgba(255,255,255,.18);letter-spacing:.04em;pointer-events:none;white-space:pre;text-align:right';
 document.body.appendChild(fpsEl); let fpsOn = true, fpsT = 0;
 window.__yerevan.showFps = on => { fpsOn = !!on; fpsEl.style.display = fpsOn ? '' : 'none'; };
 try { window.__yerevan.showFps(localStorage.getItem('yd.fps') !== '0'); } catch { /* ignore */ }
+// Per-frame section timer. A hitch (frame > 70 ms) is attributed to the sections of the frame BEFORE it (a frame's dt is measured at the start of the next one);
+// time not covered by any section is GPU wait / garbage collection / the browser ("other").
+const prof = { t: 0, sec: {}, last: {}, avg: {}, hitches: [], show: false };
+const pm = n => { const now = performance.now(); prof.sec[n] = (prof.sec[n] ?? 0) + now - prof.t; prof.t = now; };
+const pname = p => p.path.replace(/^.*\//, '').replace(/\.js$/, '');
+window.__yerevan.prof = prof;
+addEventListener('keydown', e => { if (e.code === 'Backquote') prof.show = !prof.show; });
+function hitchText() {
+  const h = prof.hitches[prof.hitches.length - 1]; if (!h || performance.now() - h.at > 25000) return '';
+  return `\nhitch ${h.ms.toFixed(0)} ms ${((performance.now() - h.at) / 1000).toFixed(0)} s ago: ${h.parts}`;
+}
+function profText() {
+  if (!prof.show) return '';
+  return '\n' + Object.entries(prof.avg).sort((a, b) => b[1] - a[1]).slice(0, 9).map(([k, v]) => k + ' ' + v.toFixed(1)).join(' · ');
+}
 renderer.setAnimationLoop(() => {
   fitSize();
+  const frameT0 = performance.now();
+  prof.t = frameT0; prof.last = prof.sec; prof.sec = {};
   const rawDt = clock.getDelta(); ft[ftN++ % ft.length] = rawDt * 1000;
-  if (fpsOn && (fpsT += rawDt) > 0.5) { fpsT = 0; const b = benchStats(); if (b) fpsEl.textContent = `${Math.round(b.fps)} FPS\n1% low ${Math.round(b.low1)} · ${(1000 / b.fps).toFixed(1)} ms`; }
+  if (rawDt > 0.07 && clock.elapsedTime > 4) {
+    const prevSum = Object.values(prof.last).reduce((s, v) => s + v, 0), parts = Object.entries({ ...prof.last, other: rawDt * 1000 - prevSum }).filter(e => e[1] > 4).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => k + ' ' + v.toFixed(0)).join(' · ');
+    prof.hitches.push({ ms: rawDt * 1000, parts, at: performance.now(), streaming: streamer.busy, batch: { ...streamer.batches?.stats } }); if (prof.hitches.length > 20) prof.hitches.shift();
+  }
+  for (const k in prof.last) prof.avg[k] = (prof.avg[k] ?? 0) + (prof.last[k] - (prof.avg[k] ?? 0)) * 0.05;
+  if (fpsOn && (fpsT += rawDt) > 0.5) { fpsT = 0; const b = benchStats(); if (b) fpsEl.textContent = `${Math.round(b.fps)} FPS · ${quality.level.toUpperCase()}${quality.capped ? ' (safe mode)' : ''} · ${renderer.getPixelRatio().toFixed(2)}x\n1% low ${Math.round(b.low1)} · ${(1000 / b.fps).toFixed(1)} ms · cpu ${cpuMs.toFixed(1)} ms${governor.status ? '\n▼ ' + governor.status : ''}${quality.crashRecovered ? '\nlast start crashed: quality lowered' : ''}${streamer.busy ? '\nloading tiles…' : ''}${hitchText()}${profText()}`; }
   const dt = Math.min(rawDt, 0.1);
   if (Math.abs(tod.day - todTarget) > 1e-3) { applyTod(tod.day + Math.sign(todTarget - tod.day) * Math.min(Math.abs(todTarget - tod.day), dt / 2.5)); }
   if (mode === 'orbit') { orbit.update(); focus.copy(orbit.target); }
   else if (mode === 'fly') {
     const fwd = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
-    const sp = flySpeed * (keys.has('ShiftLeft') ? 4 : 1) * dt;
+    const sp = flySpeed * (keys.has('ShiftLeft') ? 4 : 1) * Math.max(1, camera.position.y / 150) * dt;       // faster the higher you are: the clouds start at 1.8 km
     if (keys.has('KeyW')) camera.position.addScaledVector(fwd, sp); if (keys.has('KeyS')) camera.position.addScaledVector(fwd, -sp);
     if (keys.has('KeyD')) camera.position.addScaledVector(right, sp); if (keys.has('KeyA')) camera.position.addScaledVector(right, -sp);
     if (keys.has('KeyE')) camera.position.y += sp; if (keys.has('KeyQ')) camera.position.y -= sp;
@@ -355,27 +416,40 @@ renderer.setAnimationLoop(() => {
     camera.position.copy(camPos); camera.lookAt(carPos.clone().addScaledVector(carDir, 10).add(new THREE.Vector3(0, 1.2, 0)));
     focus.copy(carPos);
   }
+  pm('camera');
   if (clock.elapsedTime - lastLamp > 0.15) { updateLampLights(); lastLamp = clock.elapsedTime; }
-  for (const u of pluginUpdates) u(dt, camera, clock.elapsedTime);
-  { // shadow window pushed ~45 m ahead of the camera (most of the visible ground is in front of it), snapped to whole shadow texels (no shimmer)
+  pm('lamps');
+  for (const p of pluginUpdates) { p.update(dt, camera, clock.elapsedTime); pm('p:' + pname(p)); }
+  // The shadow pass re-draws every caster (twice the draw calls = twice the CPU work on weak CPUs). The map is only refreshed every
+  // quality.shadowEvery frames; between refreshes the light window stays where it was, so skipped frames are consistent, not swimming.
+  const shadowOn = quality.shadows && moon.castShadow, shadowNow = shadowOn && (shadowTick++ % Math.max(1, quality.shadowEvery) === 0);
+  renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = shadowNow;
+  if (shadowNow || !shadowOn) { // shadow window pushed ~45 m ahead of the camera (most of the visible ground is in front of it), snapped to whole shadow texels (no shimmer)
     camera.getWorldDirection(_fwd); _fwd.y = 0; if (_fwd.lengthSq() > 1e-6) _fwd.normalize();
     const q = 140 * 2 / quality.shadowMap, cx = focus.x + _fwd.x * 45, cz = focus.z + _fwd.z * 45;
     moon.target.position.set(Math.round(cx / q) * q, focus.y, Math.round(cz / q) * q); moon.position.copy(moon.target.position).addScaledVector(moonDir, 400); }
-  governor.update(dt);
+  pm('shadow');
+  governor.update(dt, cpuMs);
+  pm('governor');
   streamer.update(camera.position);
+  pm('streamer');
   sky.position.copy(camera.position); sky.material.uniforms.uTime.value = clock.elapsedTime;
-  if (clock.elapsedTime - statT > 1) { statT = clock.elapsedTime; $('stats').textContent = `${(streamer.stat.tris / 1e6).toFixed(2)}M tris · ${streamer.stat.shown} tiles shown · ${streamer.stat.loaded} loaded · q=${quality.level}${governor.level ? '-' + governor.level : ''}${(b => b ? ` · ${b.fps} fps (1% low ${b.low1}) · x${renderer.getPixelRatio().toFixed(2)}` : '')(benchStats())}`; }
+  if (clock.elapsedTime - statT > 1) { statT = clock.elapsedTime; $('stats').textContent = `${gpuName} · ${(streamer.stat.tris / 1e6).toFixed(2)}M tris · ${streamer.stat.shown} tiles shown · ${streamer.stat.loaded} loaded · q=${quality.level}${governor.level ? '-' + governor.level : ''}${(b => b ? ` · ${b.fps} fps (1% low ${b.low1}) · x${renderer.getPixelRatio().toFixed(2)}` : '')(benchStats())}`; }
   if (sceneFx) {
     const dusk = Math.max(0, 1 - Math.abs(2 * tod.day - 1));
     _keyCol.copy(moon.color).multiplyScalar(moon.intensity * 0.35); _amb.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3);
     sceneFx.update({ time: clock.elapsedTime, fog: scene.fog.color, day: tod.day, dusk, sunDir: moonDir, sunCol: moon.color, moonDir, moonCol: moon.color, fogDensity: scene.fog.density,
       keyDir: moonDir, keyCol: _keyCol, amb: _amb, shadowCenter: moon.target.position, shadowHalf: 140 });
   }
+  pm('fx');
   if (probe) probe.update(focus, tod.day, clock.elapsedTime);
+  pm('probe');
   // EffectComposer never resets its ping-pong pair: with an odd number of swapping passes (NaN guard + SSR + Output = 3) the scene alternated
   // between rt2 (has the depth texture) and rt1 (doesn't) every frame, so SSR saw fresh depth only on every other frame -> flicker.
   composer.readBuffer = composer.renderTarget2; composer.writeBuffer = composer.renderTarget1;
   composer.render();
+  pm('render');
+  cpuMs += (performance.now() - frameT0 - cpuMs) * 0.1;
   frameInfo.calls = renderer.info.render.calls; frameInfo.tris = renderer.info.render.triangles; renderer.info.reset();
   frames++; acc += dt; if (acc >= 0.5) { $('fps').textContent = (frames / acc).toFixed(0) + ' fps'; frames = 0; acc = 0; }
 });

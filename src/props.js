@@ -5,9 +5,11 @@ import { buildCars, showroom, carTriCounts } from './props/cars.js';
 import { buildFurniture } from './props/furniture.js';
 import { view, statsOf } from './props/util.js';
 
+import { fetchJSON } from './net.js';
+
 export default async function (ctx) {
   const { THREE, scene, H, camera } = ctx;
-  const data = await (await fetch('/map/props.json')).json();
+  const data = await fetchJSON('/map/props.json');
   const parts = [];
   const guard = async (name, fn) => { try { const t0 = performance.now(); const p = await fn(); if (p) parts.push(p); console.log(`[props] ${name} ready in ${(performance.now() - t0).toFixed(0)} ms`); } catch (e) { console.error(`[props] ${name} failed`, e); } };
   await guard('vegetation', () => buildVegetation({ ...ctx, data }));

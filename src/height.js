@@ -1,7 +1,7 @@
 // Runtime terrain height function (metres, 0 = Republic Square ground). Same math as tools/terrain.mjs.
+import { fetchJSON, fetchBuffer } from './net.js';
 export async function loadHeight() {
-  const meta = await (await fetch('/map/height.json')).json();
-  const buf = await (await fetch('/map/height.bin')).arrayBuffer();
+  const [meta, buf] = await Promise.all([fetchJSON('/map/height.json'), fetchBuffer('/map/height.bin')]);
   const grid = new Float32Array(buf);
   const { N, STEP, R, base } = meta;
   const H = function H(x, z) {

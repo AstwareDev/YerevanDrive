@@ -8,6 +8,7 @@ const MEDIAN_HALF = 1.55, KERB = 0.17, S_MIN = -170, S_MAX = 150, GAP_EVERY = 90
 const hash = (a, b = 0) => { let x = Math.imul((a * 374761393 + b * 668265263) | 0, 1274126177); x = Math.imul(x ^ (x >>> 13), 1103515245); return ((x ^ (x >>> 16)) >>> 0) / 4294967296; };
 
 export function buildOrbeliMedian({ data, H, root }) {
+  const wantMedian = new URLSearchParams(location.search).get('median') === '1';
   const { B, u, n } = data.strip, S = (x, z) => [(x - B[0]) * u[0] + (z - B[1]) * u[1], (x - B[0]) * n[0] + (z - B[1]) * n[1]];
   // ---- centre-line chains: Orbeli polylines clipped to the stretch in front of the block, resampled every 2 m
   const chains = [];
@@ -20,7 +21,7 @@ export function buildOrbeliMedian({ data, H, root }) {
     }
     flush();
   }
-  if (!chains.length) return { update() {} };
+  if (!chains.length || !wantMedian) chains.length = 0;      // the median (kerb, soil, flowers, shrubs, collider) is skipped unless ?median=1; the billboard and flagpole below stay
   // direction + openings
   for (const c of chains) for (let i = 0; i < c.length; i++) { const a = c[Math.max(0, i - 1)], b = c[Math.min(c.length - 1, i + 1)], dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1; c[i].tx = dx / l; c[i].tz = dz / l; c[i].y = H(c[i].x, c[i].z); c[i].open = ((c[i].s - S_MIN) % GAP_EVERY) < GAP; }
 
@@ -49,7 +50,7 @@ export function buildOrbeliMedian({ data, H, root }) {
   for (const c of chains) { let i0 = -1; for (let i = 0; i <= c.length; i++) { const ok = i < c.length && !c[i].open; if (ok && i0 < 0) i0 = i; if (!ok && i0 >= 0) { if (i - 1 - i0 >= 3) run(c, i0, i - 1); i0 = -1; } } }
 
   const mk = (p, ix, m) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setIndex(ix); g.computeVertexNormals(); const mesh = new THREE.Mesh(g, m); mesh.receiveShadow = true; mesh.castShadow = false; root.add(mesh); return mesh; };
-  mk(pos, idx, soilM).material.side = THREE.DoubleSide; mk(kpos, kidx, kerbM).material.side = THREE.DoubleSide;
+  if (pos.length) { mk(pos, idx, soilM).material.side = THREE.DoubleSide; mk(kpos, kidx, kerbM).material.side = THREE.DoubleSide; }
   const group = new THREE.Group(); group.name = 'orbeli-median-planting'; root.add(group);
   if (flowers.length) {
     const fm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.17, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }), flowers.length), m4 = new THREE.Matrix4(), c3 = new THREE.Color();

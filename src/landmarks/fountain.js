@@ -27,6 +27,7 @@ export function buildFountain({ m, root, H, renderer, camera, mats }) {
   // ---- water surface (animated normals, colour-cycling emissive)
   const wpos = [], widx = [];
   const wuniform = { uTime: { value: 0 }, uTint: { value: new THREE.Color(0.1, 0.4, 0.8) } };
+  const WATER_NIGHT = new THREE.Color(0x03121c), WATER_DAY = new THREE.Color(0x2f9c98);
   const waterMat = new THREE.MeshStandardMaterial({ color: 0x03121c, roughness: 0.05, metalness: 0.15, emissive: 0x000000, envMapIntensity: 1.8 });
   waterMat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, wuniform);
@@ -140,6 +141,9 @@ export function buildFountain({ m, root, H, renderer, camera, mats }) {
     yG, yW, jets,
     update(dt, cam, time) {
       U2.uTime.value = time; wuniform.uTime.value = time;
+      // day: clear turquoise water over the light basin (360 Stories ground view), colour-cycling light only really shows at night
+      const night = window.__yerevan?.tod?.night ?? 1, dayK = 1 - night;
+      waterMat.color.copy(WATER_NIGHT).lerp(WATER_DAY, dayK); waterMat.roughness = 0.05 + 0.1 * dayK; waterMat.envMapIntensity = 1.8 + 0.6 * dayK;
       const size = new THREE.Vector2(); renderer.getDrawingBufferSize(size);
       U2.uScale.value = size.y / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2));
       // light colours per group (match jet hue in the shader)
@@ -150,11 +154,12 @@ export function buildFountain({ m, root, H, renderer, camera, mats }) {
         const hf = j.anim ? (0.18 + 0.82 * (wave + (pulse - wave) * show)) : 1;
         gcol.setHSL(hue, 0.9, 0.5);
         const k = (j.anim ? 0.38 : 0.2) * (0.35 + 0.65 * hf);
-        for (let v = 0; v < 4; v++) cattr.setXYZ(i * 4 + v, gcol.r * k, gcol.g * k, gcol.b * k);
+        const kk = k * (0.1 + 0.9 * night);
+        for (let v = 0; v < 4; v++) cattr.setXYZ(i * 4 + v, gcol.r * kk, gcol.g * kk, gcol.b * kk);
       }
       cattr.needsUpdate = true;
       // water tint follows group 0 hue
-      wuniform.uTint.value.setHSL(((time * 0.045 + 0.55) % 1), 0.8, 0.35);
+      wuniform.uTint.value.setHSL(((time * 0.045 + 0.55) % 1), 0.8, 0.35 * (0.12 + 0.88 * night));
     },
   };
 }

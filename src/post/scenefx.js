@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { RT_GLSL, rtUniforms } from './rtworld.js';
 import { FINITE_GLSL } from '../world/probe.js';
+import { CloudComposite } from './cloudpass.js';
 
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 const COMMON = /* glsl */`
@@ -268,8 +269,10 @@ export class SceneFXPass extends Pass {
       this.uniforms.tRefl.value = this.reflRT.texture;
     }
     this.fsq = new FullScreenQuad(this.compMat);
+    this.cloud = quality.clouds > 0 ? new CloudComposite({ camera, depthTexture, quality }) : null;      // volumetric clouds seen from inside / above the layer (free camera)
   }
   setSize(w, h) {
+    this.cloud?.setSize(w, h);
     const hw = Math.max(1, Math.ceil(w / 2)), hh = Math.max(1, Math.ceil(h / 2));
     if (this.reflRT) { this.reflRT.setSize(hw, hh); this.uniforms.uRTexel.value.set(1 / hw, 1 / hh); }
     if (!this.useAO) return;
@@ -279,6 +282,7 @@ export class SceneFXPass extends Pass {
   /** per-frame state from main.js */
   update({ time, fog, day, dusk, sunDir, sunCol, moonDir, moonCol, fogDensity, keyDir, keyCol, amb, shadowCenter, shadowHalf }) {
     const u = this.uniforms, c = this.camera;
+    this.cloud?.update(time, day, dusk);
     this.proj.uProj.value.copy(c.projectionMatrix); this.proj.uProjInv.value.copy(c.projectionMatrixInverse); u.uCamWorld.value.copy(c.matrixWorld);
     u.uWet.value = this.wetness.value; u.uTime.value = time % 10; u.uDay.value = day; u.uSky.value.copy(fog).multiplyScalar(0.55 + 0.35 * day);
     u.uFogDensity.value = fogDensity; u.uSunDir.value.copy(sunDir); u.uMoonDir.value.copy(moonDir);
@@ -302,7 +306,9 @@ export class SceneFXPass extends Pass {
     }
     this.uniforms.tDiffuse.value = readBuffer.texture;
     if (this.reflRT) { this.fsq.material = this.reflMat; renderer.setRenderTarget(this.reflRT); this.fsq.render(renderer); this.fsq.material = this.compMat; }
-    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer); this.fsq.render(renderer);
+    const out = this.renderToScreen ? null : writeBuffer;
+    if (this.cloud?.active) { renderer.setRenderTarget(this.cloud.getTarget()); this.fsq.render(renderer); this.cloud.render(renderer, out); }       // camera in / above the clouds: composite them over the scene
+    else { renderer.setRenderTarget(out); this.fsq.render(renderer); }
   }
-  dispose() { this.reflRT?.dispose(); this.reflMat?.dispose(); this.aoA?.dispose(); this.aoB?.dispose(); this.aoMat?.dispose(); this.blurMat?.dispose(); this.compMat.dispose(); this.fsq.dispose(); }
+  dispose() { this.cloud?.dispose(); this.reflRT?.dispose(); this.reflMat?.dispose(); this.aoA?.dispose(); this.aoB?.dispose(); this.aoMat?.dispose(); this.blurMat?.dispose(); this.compMat.dispose(); this.fsq.dispose(); }
 }

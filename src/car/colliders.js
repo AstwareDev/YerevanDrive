@@ -3,9 +3,10 @@
 const CELL = 96, LOAD_R = 150, DROP_R = 210;
 const key = (i, j) => i * 4096 + j;
 
+import { fetchJSON } from '../net.js';
+import { quality } from '../quality.js';
 export async function createColliders({ RAPIER, world, ground, meta, circuits }) {
-  const colliders = await (await fetch('/map/colliders.json')).json();
-  let props = null; try { props = await (await fetch('/map/props.json')).json(); } catch (e) { /* optional */ }
+  const [colliders, props] = await Promise.all([fetchJSON('/map/colliders.json'), fetchJSON('/map/props.json').catch(() => null)]);
   const cells = new Map();   // key -> { i, j, items: [], handle: collider | null }
   const cellOf = v => Math.floor(v / CELL);
   function bucket(x0, z0, x1, z1, item) {
@@ -19,7 +20,14 @@ export async function createColliders({ RAPIER, world, ground, meta, circuits })
   for (const w of colliders.walls) { let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (let k = 0; k < w.l.length; k += 2) { x0 = Math.min(x0, w.l[k]); x1 = Math.max(x1, w.l[k]); z0 = Math.min(z0, w.l[k + 1]); z1 = Math.max(z1, w.l[k + 1]); } bucket(x0 - 1, z0 - 1, x1 + 1, z1 + 1, { t: 1, w }); }
   for (const c of circuits ?? []) for (const b of c.barriers ?? []) { let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const p of b.pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); } bucket(x0 - 1, z0 - 1, x1 + 1, z1 + 1, { t: 2, b }); }
   const pts = (arr, stride, t, extra) => { for (let n = 0; n < arr.length; n += stride) { const x = arr[n + (extra?.xo ?? 0)], z = arr[n + (extra?.zo ?? 1)]; bucket(x - 3, z - 3, x + 3, z + 3, { t, x, z, a: arr, n }); } };
-  if (meta?.trees) for (let n = 0; n < meta.trees.length; n += 4) { const x = meta.trees[n], z = meta.trees[n + 2]; bucket(x, z, x, z, { t: 3, x, z, r: 0.2 + 0.1 * meta.trees[n + 3] }); }
+  if (props?.trees?.length) {
+    const tr = props.trees, N = tr.length / 7;
+    // exactly the trees that are drawn: same stride and same quality thinning as keepTree() in src/props/trees.js
+    for (let i = 0; i < N; i++) {
+      const rad = tr[i * 7 + 3]; if (!(rad >= 3.2 || ((Math.imul(i, 2654435761) >>> 8) & 0xffff) / 65536 < Math.max(quality.propScale, 0.45))) continue;
+      const x = tr[i * 7], z = tr[i * 7 + 1]; bucket(x, z, x, z, { t: 3, x, z, r: Math.min(0.4, Math.max(0.18, 0.15 + rad * 0.03)) });
+    }
+  } else if (meta?.trees) for (let n = 0; n < meta.trees.length; n += 4) { const x = meta.trees[n], z = meta.trees[n + 2]; bucket(x, z, x, z, { t: 3, x, z, r: 0.2 + 0.1 * meta.trees[n + 3] }); }
   // lamp poles / bollards are deliberately NOT solid: free roam is more fun when a pole does not stop the car dead
   if (props?.cars && new URLSearchParams(location.search).get('cars') === '1') for (let n = 0; n < props.cars.length; n += 7) { const x = props.cars[n], z = props.cars[n + 1]; bucket(x - 3, z - 3, x + 3, z + 3, { t: 4, x, z, yaw: props.cars[n + 2] }); }
 

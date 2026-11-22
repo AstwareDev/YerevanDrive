@@ -45,6 +45,9 @@ function makeTexture(bitmap, { srgb, aniso, repeat = true, mips = true }) {
   return t;
 }
 
+// Only the surfaces the player stares at (road, pavement, plaza, main facades) get the full texture size; the rest is capped at 1K (a 2K set = 66 MB of VRAM:
+// 17 sets at 2K were ~1.1 GB, the main reason low-memory GPUs / tablets died while loading)
+const HERO = new Set(['asphalt_fine', 'asphalt_road', 'plaza_tuff', 'tuff_block_a', 'plaster_a', 'sidewalk_slab']);
 const PRIORITY = ['asphalt_fine', 'asphalt_road', 'road_decals', 'sidewalk_slab', 'plaza_tuff', 'plaster_a', 'tuff_block_a', 'concrete_dark', 'grass_short', 'terrain_earth', 'dirt', 'roof_clay', 'roof_bitumen', 'plaster_b', 'concrete_light', 'decal_manhole', 'metal_dark'];
 
 /** Starts loading everything in the background. Resolves (never rejects) with { name: {albedo, normal, orm} } once all sets are in. */
@@ -57,15 +60,15 @@ export async function loadPBR(renderer) {
     const aniso = Math.min(quality.anisotropy, renderer.capabilities.getMaxAnisotropy());
     const loader = new THREE.ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
     // road field: raw RGBA, no mipmaps, bilinear
-    if (manifest.roadfield && quality.level !== 'low') {
-      try { const bm = await loadBitmap(BASE + manifest.roadfield.file, loader); const t = makeTexture(bm, { srgb: false, aniso: 1, repeat: false, mips: false }); renderer.initTexture(t); pbr.roadField.value = t; pbr.roadFieldOn.value = 1; } catch (e) { console.warn('roadfield missing', e); }
+    if (manifest.roadfield && quality.aerial.road) {
+      try { const bm = await loadBitmap(BASE + (quality.aerial.road >= 4096 ? manifest.roadfield.file : manifest.roadfield.file.replace(/\.png$/, '.2k.png')), loader); const t = makeTexture(bm, { srgb: false, aniso: 1, repeat: false, mips: false }); renderer.initTexture(t); pbr.roadField.value = t; pbr.roadFieldOn.value = 1; } catch (e) { console.warn('roadfield missing', e); }
     }
     // only sets some material asked for via slot() (and the shared decal mask) are fetched: keeps VRAM and bandwidth down
     const asked = n => manifest.sets[n] && (pbr.slots[n] || (n === 'road_decals' && pbr.wantMask));
     const names = [...PRIORITY.filter(asked), ...Object.keys(manifest.sets).filter(n => !PRIORITY.includes(n) && asked(n))];
     for (const name of names) {
       const info = manifest.sets[name];
-      const want = info.kind === 'mask' ? Math.min(1024, quality.texSize) : quality.texSize;
+      const want = info.kind === 'mask' ? Math.min(1024, quality.texSize) : HERO.has(name) ? quality.texSize : Math.min(1024, quality.texSize);
       const size = [...info.sizes].sort((a, b) => a - b).filter(s => s <= want).pop() ?? info.sizes[0];
       try {
         if (info.kind === 'mask') {

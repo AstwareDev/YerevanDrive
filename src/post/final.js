@@ -46,7 +46,7 @@ export class FinalPass extends Pass {
     const ultra = quality.level === 'ultra', hi = ultra || quality.level === 'high';
     this.uniforms = {
       tDiffuse: { value: null }, toneMappingExposure: { value: 1 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) },
-      uVignette: { value: hi ? 0.32 : 0.2 }, uGrain: { value: ultra ? 0.022 : 0.012 }, uCA: { value: ultra ? 0.006 : 0 }, uSat: { value: 1.06 }, uContrast: { value: hi ? 0.14 : 0.08 },
+      uVignette: { value: hi ? 0.32 : 0.2 }, uGrain: { value: ultra ? 0.022 : 0.012 }, uCA: { value: ultra ? 0.0022 : 0 }, uSat: { value: 1.06 }, uContrast: { value: hi ? 0.14 : 0.08 },
     };
     // RawShaderMaterial (like OutputPass): a plain ShaderMaterial would get three's own tone-mapping prefix and apply it twice when rendering to screen
     this.material = new THREE.RawShaderMaterial({ uniforms: this.uniforms, vertexShader: 'precision highp float; attribute vec3 position; attribute vec2 uv; varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: FRAG, depthTest: false, depthWrite: false });

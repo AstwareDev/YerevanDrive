@@ -40,18 +40,25 @@ export function createProbe({ renderer, scene, quality, fallback }) {
     for (const o of hidden) o.visible = true;
     renderer.setRenderTarget(prevTarget); renderer.shadowMap.autoUpdate = prevAuto; renderer.xr.enabled = prevXr;
   }
+  let paceTick = 0;
   return {
     get texture() { return cleanRT?.texture ?? fallback; },
     /** call once per frame before the main render */
     enabled: true,
+    minInterval: quality.level === 'ultra' ? 2.5 : 4,        // seconds between two refreshes (a refresh = 6 scene renders + a prefilter)
+    moveDist: quality.level === 'ultra' ? 30 : 45,           // metres the focus must move before the street counts as changed
+    stale: 10,                                               // refresh anyway after this many seconds
+    pace: quality.level === 'ultra' ? 1 : 2,                 // render a cube face every N frames (higher = the cost is spread thinner)
     update(focus, day, time) {
       if (!this.enabled) return false;
       if (face < 0) {
-        const moved = last.distanceToSquared(focus) > 144, todChanged = Math.abs(day - lastDay) > 0.02, stale = time - lastT > 4;
+        const moved = last.distanceToSquared(focus) > this.moveDist * this.moveDist, todChanged = Math.abs(day - lastDay) > 0.02, stale = time - lastT > this.stale;
         if (!(moved || todChanged || stale)) return false;
+        if (time - lastT < this.minInterval && lastT > -1e8) return false;
         pos.set(focus.x, focus.y + 2.2, focus.z); cam.position.copy(pos); cam.updateMatrixWorld(true);
         last.copy(focus); lastDay = day; lastT = time; face = 0; hidden = hideList();
       }
+      if (face >= 0 && ++paceTick % this.pace !== 0) return false;
       renderFace(face++);
       if (face === 6) {
         face = -1;

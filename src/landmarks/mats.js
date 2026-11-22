@@ -66,6 +66,18 @@ function floodPatch(mat, { col = [1.0, 0.62, 0.3], base = 0.04, up = 0.9, L = 12
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float gnd; varying float vGnd; varying vec3 vWN2; varying vec3 vWP2;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGnd = gnd; vWN2 = normalize(mat3(modelMatrix) * normal); vWP2 = (modelMatrix * vec4(position,1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vGnd; varying vec3 vWN2; varying vec3 vWP2; uniform vec3 uGC; uniform float uGB, uGU, uGL;')
+      .replace('#include <common>', `#include <common>
+float wH(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(wH(i), wH(i + vec2(1.0, 0.0)), f.x), mix(wH(i + vec2(0.0, 1.0)), wH(i + vec2(1.0, 1.0)), f.x), f.y); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        { float wl = 1.0 - abs(vWN2.y);                                           // walls only
+          vec2 tg = normalize(vec2(-vWN2.z, vWN2.x) + 1e-4);
+          vec2 w2 = vec2(dot(vWP2.xz, tg), vWP2.y);
+          float tone = 0.86 + 0.26 * wN(w2 * 0.33) + 0.12 * (wN(w2 * 1.9) - 0.5);        // slow weathering patches
+          float streak = smoothstep(0.55, 0.95, wN(vec2(w2.x * 3.1, w2.y * 0.11))) * (0.14 + 0.1 * wN(w2 * 0.2));   // rain streaks
+          float soil = exp(-max(vGnd, 0.0) / 2.2) * 0.3;                                  // splash / traffic soiling at the base
+          diffuseColor.rgb *= mix(1.0, tone * (1.0 - streak), wl);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.58, 0.52, 0.46), soil * wl); }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         { float h = max(vGnd, 0.0);
           float fall = exp(-h / uGL);
@@ -79,27 +91,72 @@ function floodPatch(mat, { col = [1.0, 0.62, 0.3], base = 0.04, up = 0.9, L = 12
 }
 
 function glassPatch(mat, k = 1.0) {
+  // unlit panes carry a per-window id in vertex-colour blue (see facade.js glassCols) and window-local uv: draw a believable interior by day
+  // (curtains with folds, slatted blinds, lace, a dim room) instead of a black hole; it is lit by the sun / shadows like any diffuse surface.
   mat.onBeforeCompile = sh => {
     sh.uniforms.uEK = { value: k };
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uEK;').replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance = vColor.rgb * uEK;');
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
+varying vec2 vGuv;`).replace('#include <begin_vertex>', `#include <begin_vertex>
+vGuv = uv;`);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+uniform float uEK; varying vec2 vGuv;
+float gH(float x){ return fract(sin(x * 91.7 + 13.1) * 43758.5453); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float gFm = 0.0;
+        { float unl = step(0.001, vColor.r) * step(vColor.r, 0.03);
+          float id = clamp((vColor.b - 0.034) * 1000.0, 0.0, 1.0);
+          vec2 q = vGuv; vec3 fab = vec3(0.0); float cov = 0.0;
+          vec3 room = mix(vec3(0.010, 0.014, 0.024), vec3(0.11, 0.09, 0.07), smoothstep(0.6, 0.0, q.y) * 0.7);
+          if (id > 0.25 && id < 0.55) {
+            vec3 pal[6]; pal[0] = vec3(0.62, 0.56, 0.45); pal[1] = vec3(0.50, 0.40, 0.30); pal[2] = vec3(0.50, 0.34, 0.31); pal[3] = vec3(0.34, 0.40, 0.31); pal[4] = vec3(0.40, 0.44, 0.52); pal[5] = vec3(0.70, 0.68, 0.64);
+            int pi = int(floor(gH(id) * 5.99)); vec3 c = pal[0]; for (int i = 0; i < 6; i++) if (i == pi) c = pal[i];
+            float full = step(gH(id * 3.1), 0.3), cw = 0.28 + 0.2 * gH(id * 7.3);
+            cov = step(1.0 - (0.8 + 0.2 * gH(id * 5.0)), q.y) * max(full, step(q.x, cw) + step(1.0 - cw, q.x));
+            float aa = clamp(1.0 - fwidth(q.x) * 14.0, 0.0, 1.0);                       // fade the folds out with distance (no shimmer)
+            fab = c * (1.0 - 0.38 * aa + 0.38 * aa * sin(q.x * 44.0 + id * 9.0)) * (0.8 + 0.2 * smoothstep(1.0, 0.7, q.y));
+          } else if (id >= 0.55 && id < 0.78) {
+            float f = 0.3 + 0.7 * gH(id * 5.7); cov = step(1.0 - f, q.y);
+            fab = mix(vec3(0.46, 0.44, 0.40), vec3(0.62, 0.60, 0.56), gH(id * 2.3)) * (1.0 - 0.22 * clamp(1.0 - fwidth(q.y) * 18.0, 0.0, 1.0) * (0.5 - 0.5 * sin(q.y * 100.0)));
+          } else if (id >= 0.78 && id < 0.9) { cov = 0.55; fab = vec3(0.62, 0.6, 0.57); }
+          vec3 inner = mix(room, fab, cov);
+          diffuseColor.rgb = mix(diffuseColor.rgb, inner, unl);
+          gFm = unl * cov;
+        }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = mix(roughnessFactor, 0.85, gFm);`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+metalnessFactor = mix(metalnessFactor, 0.0, gFm);`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+ totalEmissiveRadiance = vColor.rgb * uEK;`);
   };
-  mat.customProgramCacheKey = () => 'lmglass';
+  mat.customProgramCacheKey = () => 'lmglass2';
   return mat;
 }
 
 export function makeLandmarkMaterials(renderer, T) {
   const aniso = renderer?.capabilities?.getMaxAnisotropy?.() ?? 8;
-  const S = {}; const rep = [1 / 4, 1 / 4];
+  const S = {}; const rep = [1, 1];   // uv is already in 4 m units (kit.js uvS): one 512 px ashlar tile = 4 m, 0.5 m courses
   const mk = (base, o, mo) => { const { col, bmp } = ashlar(base, o); const map = toTex(col, true, rep, aniso), bump = toTex(bmp, false, rep, aniso); return new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: mo?.bump ?? 1.6, roughness: mo?.rough ?? 0.9, metalness: 0, vertexColors: true }); };
   const M = {};
   M.rose = floodPatch(mk([224, 158, 124], { seed: 3, yellow: 0.0 }), { col: [1.0, 0.58, 0.28], base: 0.05, up: 0.85, L: 15 });
+  M.pink = floodPatch(mk([200, 141, 131], { seed: 7, yellow: 0.0 }), { col: [1.0, 0.58, 0.34], base: 0.05, up: 0.85, L: 15 });   // Marriott block: mauve-pink tuff with pale bands (ground-level 360 Stories view)
   M.cream = floodPatch(mk([226, 196, 148], { seed: 5, yellow: 0.3 }), { col: [1.0, 0.64, 0.32], base: 0.05, up: 0.85, L: 15 });
   M.rust = floodPatch(mk([205, 140, 108], { seed: 9, yellow: -0.1, rustic: 1 }, { bump: 2.4 }), { col: [1.0, 0.55, 0.26], base: 0.05, up: 1.0, L: 10 });
   M.basalt = floodPatch(mk([88, 82, 84], { seed: 12, yellow: -0.3, pits: 1 }), { col: [1.0, 0.6, 0.3], base: 0.02, up: 0.9, L: 4 });
   M.white = floodPatch(mk([232, 226, 216], { seed: 14, yellow: 0.1 }), { col: [1.0, 0.66, 0.36], base: 0.05, up: 0.85, L: 18 });
   const tile = toTex(tileTexture(256), true, [1 / 3, 1 / 3], aniso);
   M.tile = floodPatch(new THREE.MeshStandardMaterial({ map: tile, roughness: 0.65, metalness: 0, vertexColors: true, color: 0xffd0c0 }), { col: [1, 0.55, 0.35], base: 0.07, up: 0.28, L: 40 });
-  M.roofflat = new THREE.MeshStandardMaterial({ color: 0x3c3d44, roughness: 0.9, vertexColors: true, emissive: 0x0a0a10 });
+  { // flat roofs: bitumen membrane strips with seams, gravel speckle, ponding stains and patches (4 m tile)
+    const sz = 512, c = canvasOf(sz, sz), g = c.getContext('2d'), im = g.createImageData(sz, sz);
+    for (let y = 0; y < sz; y++) for (let x = 0; x < sz; x++) {
+      const strip = Math.floor(x / 64), seam = (x % 64) < 2 ? 0.55 : 1, n = fbm(x / sz, y / sz, 5, 4, 41), st = 0.9 + hash(strip, 3, 5) * 0.2, gr = hash(x, y, 8);
+      let k = (0.62 + n * 0.55) * st * seam * (0.92 + gr * 0.16); if (n > 0.62) k *= 0.8; if (gr > 0.985) k *= 1.6;
+      const i = (y * sz + x) * 4; im.data[i] = 118 * k; im.data[i + 1] = 120 * k; im.data[i + 2] = 126 * k; im.data[i + 3] = 255;
+    }
+    g.putImageData(im, 0, 0);
+    M.roofflat = new THREE.MeshStandardMaterial({ map: toTex(c, true, [1, 1], aniso), color: 0xffffff, roughness: 0.88, vertexColors: true });
+  }
+  M.zinc = new THREE.MeshStandardMaterial({ color: 0x8e949b, roughness: 0.55, metalness: 0.35, vertexColors: true, emissive: 0x0a0b0d });   // light-grey sheet-metal roofs (Government House, seen in the 360 Stories aerials)
   M.glass = glassPatch(new THREE.MeshStandardMaterial({ color: 0x06080c, roughness: 0.1, metalness: 0.65, vertexColors: true, envMapIntensity: 1.4 }), 1.0);
   M.frame = new THREE.MeshStandardMaterial({ color: 0xcfc8ba, roughness: 0.6, metalness: 0.0, vertexColors: true, emissive: 0x1c140c });
   M.metal = new THREE.MeshStandardMaterial({ color: 0x3b4a44, roughness: 0.45, metalness: 0.7, vertexColors: true });

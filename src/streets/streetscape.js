@@ -6,6 +6,7 @@
 //   Both   : yellow zebra crossings (all Yerevan crossings in the reference photos are yellow).
 import * as THREE from 'three';
 import { h3 } from './facade.js';
+import { fetchJSON } from '../net.js';
 
 const lines = flat => flat.map(r => { const p = []; for (let i = 0; i < r.length; i += 2) p.push([r[i], r[i + 1]]); return p; });
 function nearestOn(pls, x, z, skip = null) {
@@ -126,7 +127,7 @@ export function buildStreetscape({ data, H, root, M }) {
     pick.forEach((i, k) => { const x = trees[i * 7], z = trees[i * 7 + 1], h = trees[i * 7 + 4], r = Math.max(0.1, Math.min(0.24, 0.035 * h)); m4.compose(v3.set(x, H(x, z) - 0.05, z), q.identity(), sc.set(r, 1.15, r)); im.setMatrixAt(k, m4); });
     im.receiveShadow = true; root.add(im); stats.whitewash = pick.length;
   };
-  fetch('/map/props.json').then(r => r.json()).then(p => addWhitewash(p.trees)).catch(() => {});
+  fetchJSON('/map/props.json').then(p => addWhitewash(p.trees)).catch(() => {});
 
   // ------------------------------------------------------------------ Orbeli 12 bus shelter + Baghramyan-corner street-name stele
   if (O.length) {

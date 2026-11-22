@@ -88,6 +88,7 @@ const WALL_FRAG_MAIN = /* glsl */`
   vec2 f = vF;
   float pix = max(fwidth(f.x), fwidth(f.y));                                      // metres per pixel (shader LOD)
   float lod = smoothstep(0.12, 0.32, pix);
+  float bfade = 1.0 - smoothstep(0.05, 0.16, pix), tfade = 1.0 - smoothstep(0.04, 0.12, pix), rfade = 1.0 - smoothstep(0.03, 0.09, pix);   // detail fades: ashlar block / panel tile / room interior
   bool ground = f.y < gH;
   float bx = floor(f.x / bay), lx = f.x - bx * bay;
   float row = ground ? -1.0 : floor((f.y - gH) / flH), ly = ground ? f.y : f.y - gH - row * flH;
@@ -97,7 +98,7 @@ const WALL_FRAG_MAIN = /* glsl */`
   vec3 albedo = pal; float rough = 0.88; vec3 nW = Nw; vec3 emis = vec3(0.0);
   if (style == 1 || style == 2) {                                                  // tuff-tile cladding on precast panels: 0.25 m tiles, 3 x floor panels
     vec2 tu = f / vec2(0.25, 0.25), ti = floor(tu), tf = fract(tu);
-    float tv = h3(ti.x, ti.y, seed); albedo *= 0.88 + 0.22 * tv;
+    float tv = h3(ti.x, ti.y, seed); albedo *= mix(0.99, 0.88 + 0.22 * tv, tfade);
     float joint = 1.0 - step(0.06, tf.x) * step(0.06, tf.y);
     vec2 pu = vec2(f.x / bay, (f.y - gH) / flH), pf = abs(fract(pu) - 0.5);
     float pj = step(0.485, max(pf.x * bay / 3.0, pf.y));
@@ -108,7 +109,7 @@ const WALL_FRAG_MAIN = /* glsl */`
     vec2 au = vec2(f.x / 0.62, f.y / 0.31); float course = floor(au.y); au.x += mod(course, 2.0) * 0.5;
     vec2 ai = floor(au), af = fract(au);
     float bv = h3(ai.x, ai.y, seed + 3.0), dark = step(0.93, h3(ai.x, ai.y, seed + 9.0));
-    albedo *= (0.86 + 0.24 * bv) * mix(1.0, 0.72, dark);
+    albedo *= mix(0.96, (0.86 + 0.24 * bv) * mix(1.0, 0.72, dark), bfade);
     vec2 m = min(af, 1.0 - af) * vec2(0.62, 0.31);
     float mortar = 1.0 - smoothstep(0.004, 0.012, min(m.x, m.y));
     albedo = mix(albedo, albedo * 1.12 + 0.02, mortar * (1.0 - lod) * 0.7);
@@ -190,8 +191,10 @@ const WALL_FRAG_MAIN = /* glsl */`
         else {
           isGlass = 1.0;
           float wroom = kind == 3 ? gs.x : gs.x, R = kind == 3 ? 6.0 : 3.6;
-          float wallK; float rs = seed * 31.0 + bx * 7.0 + row * 13.0;
-          vec3 rc = room(g, normalize(vec3(v.xy, v.z)), wroom, kind == 3 ? gs.y + 0.6 : flH - 0.4, R, rs, lit, wallK);
+          float wallK = 1.0; float rs = seed * 31.0 + bx * 7.0 + row * 13.0;
+          vec3 rcAvg = mix(vec3(0.72, 0.66, 0.55), vec3(0.62, 0.70, 0.66), h3(rs, 11.0, 3.0)) * (0.8 + 0.3 * h3(rs, 13.0, 1.0)) * 0.62;      // average colour of the room (what far windows show)
+          vec3 rc = rcAvg;
+          if (rfade > 0.0) rc = mix(rcAvg, room(g, normalize(vec3(v.xy, v.z)), wroom, kind == 3 ? gs.y + 0.6 : flH - 0.4, R, rs, lit, wallK), rfade);
           float curtain = 0.0;
           if (kind == 0 || kind == 1) { float hc = h3(seed, bx, row + 80.0); if (hc < 0.55) { float cw = gs.x * (0.18 + 0.2 * hc); curtain = step(g.x, cw) + step(gs.x - cw, g.x); } if (hc > 0.8) curtain = max(curtain, 0.55); }
           vec3 curtainC = mix(vec3(0.85, 0.8, 0.68), vec3(0.6, 0.45, 0.4), h3(seed, bx, row + 81.0));

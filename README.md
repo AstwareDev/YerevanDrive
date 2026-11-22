@@ -66,6 +66,8 @@ Plug in a controller (Xbox / PlayStation / most USB pads; Chrome and Edge need o
 ## Sky
 `src/sky.js`: night / dusk (golden hour) / day, with procedural banded cloud decks that drift with the wind and are lit by the sun or moon (dark blue deck with a golden gap at dusk, city-glow violet at night). **T** cycles night -> dusk -> day; `uCover` in the sky material sets cloud amount.
 
+**Volumetric clouds (High / Ultra).** A slab 1.8-4 km above the camera is ray-marched through a tileable 3D noise texture (`src/skyNoise.js`, 64^3, generated in small CPU slices in the background; the 2D clouds show until it is ready, then cross-fade) with Beer-Lambert extinction, a two-lobe Henyey-Greenstein phase (silver lining), a short march towards the sun/moon for self-shadowing, bump shading of the lumps, flat bellies / rounded tops and a height-based ambient. Clouds are in world space (parallax while driving) and drift with the wind. **Free camera:** the layer is a real slab 1.8-4 km above the ground. Below it the sky dome draws the clouds; once the camera reaches 1.8 km (free camera / orbit, **E** climbs and flight speed grows with altitude) `src/post/cloudpass.js` composites the same march over the scene using the depth buffer, so you can fly into the mist and look down on the cloud deck with the city beneath (costs nothing at street level). Ultra = 22 steps + 3 light taps, High = 12 steps + 2, reflection-probe faces use a rough 6-step pass; Low / Med keep the 2D decks. Override with `?clouds=0|1|2` (0 = 2D, 1 = High, 2 = Ultra) to compare or if a GPU struggles. To preview the look without a GPU/browser: `node tools/sim-clouds.mjs out.png <day 0..1> <yaw> <pitch>` (CPU port of the march, kept in sync by hand with `volClouds` in `src/skyClouds.js`; optional last argument = camera altitude, e.g. 2600 inside the layer, 6000 above it).
+
 ## Multiplayer + deploying to Netlify
 Every browser tab is a player; everyone sees everyone's car (ghost cars, no player-vs-player collisions), name tags, an *ONLINE* list (click your own row to rename) and the other drivers on the minimap / map.
 `src/mp.js` sends the car state at 15 Hz over serverless WebRTC (Trystero; public Nostr relays are only used to find peers) plus a BroadcastChannel for tabs of the same browser, so **no backend is needed**. Default room is `public`; `?room=friends` makes a private one, `?mp=0` turns it off.
@@ -93,3 +95,18 @@ Beyond it the usual far LOD tiles (L1 now reaches +-4096 m) carry the rest of Ye
   `node tools/fetch-data.mjs` (height grid, OSM is skipped when present) → `node tools/fetch-imagery.mjs 17 2304 public/map/aerial.webp -768 -1280` → `node tools/build-textures.mjs roadfield` →
   `node --max-old-space-size=20000 tools/build-map.mjs` (~15 min) → `tools/build-props.mjs` → `tools/build-tiles.mjs`.
 * Lamp glow pools are scaled down where lamps are dense (long avenues), otherwise the additive pools washed the whole road out.
+
+## Performance & memory (weak PCs, tablets)
+
+- **Presets** (`src/quality.js`): `low / med / high / ultra`. Besides resolution/shadows each one has a *pixel budget* (max internal pixels, so a 1440p monitor
+  on Ultra is no longer rendered as 4K + 4x MSAA), a point-light pool size (`lights`, paid per pixel in every lit material), a shadow-map refresh rate
+  (`shadowEvery`) and photo-layer sizes (`aerial`). `?pr=1.0` forces a render scale, `?lights=N`, `?shadowEvery=N`, `?msaa=N` override single knobs.
+- **Auto mode** picks the preset from the GPU name, core count, device memory and touch input. If the previous start died while loading (OOM / GPU reset) the
+  next start is capped one tier lower ("safe mode" in the fps box); picking a level in Settings > Graphics lifts the cap. A lost WebGL context does the same.
+- **Governor** (`src/perf.js`): works out whether the frame is CPU- or GPU-bound, lowers resolution / shadow refresh / draw distance / effects in that order,
+  climbs back up when there is headroom, remembers what it learned per preset, and shows what it changed under the fps counter.
+- **Streaming** (`src/world/streamer.js`): coarse tiles (L2+) stay resident so a teleport always has terrain under it; L3-L4 come from one pack file
+  (`node tools/pack-tiles.mjs`); map selection / teleport call `drive.prefetch(x, z)`; tile attach is time-sliced per mesh.
+- **Assets**: `node tools/make-lowres.mjs` writes the half-resolution photo layers (`*.2k.webp`, `roadfield.2k.png`) used by Low/Med; PBR texture sets are capped at 1K
+  except the hero surfaces (road, pavement, plaza, main facades) in `src/pbr.js`.
+- Not done yet (biggest remaining wins): KTX2/Basis GPU texture compression (needs an encoder), moving GLB parsing + batching into a Worker, TAA/FSR-style upscaling.
