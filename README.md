@@ -1,21 +1,102 @@
-# Yerevan Drift — Republic Square map (Three.js)
+<p align="center">
+  <a href="https://yerevan-drive.netlify.app"><img src="docs/img/cover.jpg" alt="Yerevan Drift: a BMW M2 on the wet streets next to Republic Square at dusk" width="100%"></a>
+</p>
 
-A drivable 3D map of central Yerevan around Republic Square (40.17765 N, 44.5127 E), built from open data + real aerial imagery. Night by default (neon, wet asphalt), day mode on `T`. Drive a drift car, fly the free camera, search addresses with a GPS navigator, or join other drivers online. Everything runs in the browser; there is no backend.
+<h1 align="center">Yerevan Drift</h1>
 
-## Quick start
-You need [Node.js](https://nodejs.org/) 22 or newer. The baked map data (`public/`, ~240 MB) is committed, so a fresh clone runs as is; you do **not** have to rebuild anything.
+<p align="center">
+  <b>Drive, drift and fly through central Yerevan, right in your browser.</b><br>
+  A 3D city built from real OpenStreetMap data and aerial imagery, with a drift-physics car, a GPS navigator and online multiplayer.<br>
+  Everything runs client-side: no backend, nothing to install for players.
+</p>
 
+<p align="center">
+  <b><a href="https://yerevan-drive.netlify.app">&#9654; Play now: yerevan-drive.netlify.app</a></b>
+</p>
+
+<p align="center">
+  <a href="#get-the-game">Get the game</a> ·
+  <a href="#preview">Preview</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#controls">Controls</a> ·
+  <a href="#how-it-works-uml">Architecture</a> ·
+  <a href="#data--licensing">Licensing</a>
+</p>
+
+---
+
+## Get the game
+
+### Play instantly in your browser
+Open **<https://yerevan-drive.netlify.app>**: nothing to download or install. Everyone who opens it lands in the same online room, so you will see other drivers. The first load streams the city tiles and compiles shaders, so give the loading bar a moment.
+
+### Or run your own copy
+The map is a Vite + three.js web app. The baked map data (`public/`, about 240 MB) is committed, so a fresh copy runs as is and you do **not** have to rebuild anything.
+
+**You need** [Node.js](https://nodejs.org/) 22 or newer, [Git](https://git-scm.com/) (or just a browser to download the ZIP) and a desktop browser with WebGL2. A dedicated GPU is strongly recommended; the game picks a quality preset for your machine automatically.
+
+### Option 1: clone with Git (recommended)
 ```
+git clone https://github.com/AstwareDev/YerevanDrive.git
+cd YerevanDrive
 npm install
-npm run dev      # then open the printed address (usually http://localhost:5173)
+npm run dev
+```
+Then open the address Vite prints (usually <http://localhost:5173>). The first load streams the city tiles and compiles shaders, so give it a moment: the loading bar shows progress.
+
+> The full history is large (the repository holds the raw source data). If you only want to play, add `--depth 1` to `git clone` to skip the history.
+
+### Option 2: download a ZIP (no Git)
+1. Open <https://github.com/AstwareDev/YerevanDrive>, press the green **Code** button and choose **Download ZIP** (direct link: <https://github.com/AstwareDev/YerevanDrive/archive/refs/heads/main.zip>).
+2. Unzip it, open a terminal in the unzipped folder and run `npm install`, then `npm run dev`.
+
+### Play online with friends
+Open the same address in several tabs or browsers: every tab is a driver. For a private room use `?room=myfriends` (for example `http://localhost:5173/?room=myfriends`). To let people on the internet join you, deploy the site (see [Multiplayer + deploying to Netlify](#multiplayer--deploying-to-netlify)), or just share the live site above.
+
+### Other commands
+```
+npm run build    # production bundle in dist/ (static files, host anywhere)
+npm run build:all  # re-bake all map data (only needed if you change the data or the generators, see "Rebuild the data")
 ```
 
-Use a desktop browser with WebGL2 and a dedicated GPU if you can. The game picks a quality preset automatically (`?q=low|med|high|ultra` overrides it, see *Performance* below).
+## Preview
 
-```
-npm run dev      # viewer: 1 orbit · 2 fly (drag, WASD, Q/E, Shift, wheel) · 3 drive tour · N next road · T day/night · R wet/dry · B bloom · H hide HUD
-npm run build    # production bundle (dist/)
-```
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/preview-square-day.jpg" alt="Free camera over Republic Square by day"><br><sub><b>Free camera over Republic Square</b>, day mode (<kbd>T</kbd> cycles night, dusk, day)</sub></td>
+    <td width="50%"><img src="docs/img/preview-street-dusk.jpg" alt="Golden hour on wet Yerevan streets"><br><sub><b>Golden hour at street level</b>: wet asphalt, lit windows, reflections</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/img/preview-garage.jpg" alt="The garage with the McLaren P1"><br><sub><b>Garage</b>: BMW M2, McLaren P1, Lamborghini Countach and 8 paints</sub></td>
+    <td width="50%"><img src="docs/img/preview-menu.jpg" alt="Role menu: driver or spectator"><br><sub><b>Menu</b>: play as a driver or watch the others as a spectator</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots taken on the Ultra preset during development; the look changes a little as the city gets more detail.</sub>
+
+## Features
+
+- **Real city, real streets.** Republic Square and its surroundings from OpenStreetMap, real terrain heights and aerial photo textures. The detailed area runs from Republic Square to Marshal Baghramyan Ave, Orbeli Brothers St, Barekamutyun metro and Komitas Ave, and the rest of Yerevan is streamed as distant LOD tiles out to the horizon.
+- **Hand-modelled landmarks.** Government House with the clock tower, History Museum and National Gallery, the singing fountains, Northern Avenue, the Opera House and St Gregory Cathedral, plus procedural facades along Orbeli and Komitas.
+- **Drift car.** Rapier handles collisions; the tyres, engine, gearbox and assists are our own physics. Three garage cars (BMW G87 M2 widebody, McLaren P1, Lamborghini Countach), paints, four cameras, gamepad with rumble, drift scoring.
+- **Day, dusk and night.** Wet or dry asphalt, neon, street-lamp light, a night sky with Ararat on the horizon and volumetric clouds you can fly through.
+- **Ultra graphics, scalable down.** Ambient occlusion, screen-space plus ray-traced reflections, a live reflection probe and tile batching. Four quality presets and a governor that lowers settings when the frame rate drops, so it also runs on weak PCs.
+- **GPS navigator.** Press <kbd>F</kbd> for a map with address and place search, turn-by-turn guidance, a minimap and voice prompts.
+- **Multiplayer without a server.** Peer-to-peer WebRTC (ghost cars, name tags, online list) that works on a static host.
+
+## Controls
+
+| Key | Action |
+|---|---|
+| <kbd>W</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>D</kbd> | throttle / brake, steer (fly camera: move) |
+| <kbd>Space</kbd> · <kbd>Shift</kbd> | handbrake · clutch-kick |
+| <kbd>C</kbd> · <kbd>R</kbd> · <kbd>J</kbd> | change camera · respawn · jump to a named street |
+| <kbd>F</kbd> | map, search and GPS |
+| <kbd>Tab</kbd> · <kbd>Esc</kbd> | switch driver / spectator · menu |
+| <kbd>T</kbd> | night, dusk, day |
+| <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> | orbit, fly, drive tour, drive |
+
+The full list (gears, assists, paint, lights, sound, gamepad) is in [Driving](#driving-srccarjs--srccar) and [Gamepad / joystick](#gamepad--joystick). Handy URL options: `?q=low|med|high|ultra` (quality), `?mp=0` (no multiplayer), `?room=name` (private room), `?clouds=0|1|2`, `?circuits=1`, `?cars=1`.
 
 ## How it works (UML)
 ![Component overview](docs/img/01-components.png)
@@ -25,15 +106,25 @@ npm run build    # production bundle (dist/)
 Full UML set in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: start-up and per-frame sequence diagrams, car and streaming class diagrams, the menu / camera state machine and the build-time data pipeline. Regenerate the images with `npm run docs:diagrams`.
 
 ## Rebuild the data (order matters)
-`npm run build:all` runs the baking tools in the right order (orbeli → landmarks → map → tiles → props → clean-onroad → car → nav). The older step list below still shows what each tool does; the *Extended city* section further down has the current fetch order.
+Only needed if you change the data or the generators: the baked files in `public/` are already committed. `npm run build:all` runs the baking tools in the right order (orbeli → landmarks → map → tiles → props → clean-onroad → car → nav). Individual steps:
 
 ```
-npm run data              # OSM (Overpass) + elevation (AWS Terrain Tiles z15)      -> data/
-npm run imagery           # aerial mosaics (z18 whole map, z19 centre)               -> public/map/aerial*.webp
-npm run build:landmarks   # hand-modelled landmarks, writes data/landmark-skip.json  -> public/map/lm/
-npm run build:map         # base map GLB + meta + AO (needs the skip list above)     -> public/map/yerevan.glb (46 MB raw -> 13 MB meshopt)
-npm run build:props       # vegetation / parked cars / street furniture placement    -> public/map/props.json
+npm run data              # OSM (Overpass) + elevation (AWS Terrain Tiles)           -> data/
+npm run data:far          # far-field OSM chunks, coarse heights, far imagery        -> data/osm_far, public/map/aerial_*.webp
+npm run imagery           # aerial mosaics                                           -> public/map/aerial*.webp
+npm run build:textures    # PBR texture library (needs data/tex_raw from ambientCG)  -> public/tex/
+npm run build:landmarks   # hand-modelled landmark footprints + skip list            -> public/map/lm/, data/landmark-skip.json
+npm run build:map         # terrain, roads, colliders, meta, AO                      -> public/map/*
+npm run build:tiles       # streaming LOD tiles L0..L4 + the packed horizon file     -> public/tiles/
+npm run build:props       # vegetation, street furniture, lamps, neon placement      -> public/map/props.json
+npm run clean:road        # drop props that landed on the carriageway
+npm run build:car         # BMW M2 game asset (other cars: tools/build-car-pack.mjs) -> public/car/
+npm run build:nav         # road graph + search index + satellite basemap            -> public/map/nav.json
+npm run build:lowres      # half-resolution photo layers for the Low / Med presets
+npm run sim:car           # headless car physics harness (tuning)
+npm run test:nav          # headless router check
 ```
+The *Extended city* section further down has the fetch order for the larger free-drive region.
 
 ## Layout
 - `tools/build-map.mjs` – terrain, roads (lane markings, sidewalks, crossings), parks/plazas/water, extruded buildings in 4 facade styles (tuff, panel, glass tower, house), hipped roofs detected from the aerial photo, parapets/cornices, neon signs, walls, lamps, baked contact-AO. Local frame: x east, y up (0 = square), z south.
