@@ -132,6 +132,7 @@ const dummy = new THREE.Object3D();
 const lampHeads = [];
 const fx = [];   // { color: THREE.Color, base: THREE.Color } basic-material glows that fade out in daylight
 const tod = { day: 0, night: 1 };   // shared with plugins: read tod.night (0..1) to scale emissive/lights
+tod.light = { dir: moonDir, key: moon, hemi };   // live references (tyre smoke lights itself with them)
 {
   const n = meta.lamps.length / 6;
   const pole = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.1, 1, 6).translate(0, 0.5, 0), new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 0.5, metalness: 0.7 }), n);

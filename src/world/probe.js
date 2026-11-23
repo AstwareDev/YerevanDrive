@@ -29,7 +29,7 @@ export function createProbe({ renderer, scene, quality, fallback }) {
   const cleanQuad = new FullScreenQuad(cleanMat);
   let envRT = null, face = -1, last = new THREE.Vector3(1e9, 0, 0), lastDay = -1, lastT = -1e9, hidden = [];
   const pos = new THREE.Vector3();
-  const hideList = () => { const out = []; const car = scene.getObjectByName('player-car'); car?.traverse(o => { if ((o.isMesh || o.isLine) && o.visible) out.push(o); }); scene.traverse(o => { if (o.isPoints && o.visible) out.push(o); }); return out; };
+  const hideList = () => { const out = []; const car = scene.getObjectByName('player-car'); car?.traverse(o => { if ((o.isMesh || o.isLine) && o.visible) out.push(o); }); scene.traverse(o => { if ((o.isPoints || o.userData.noProbe) && o.visible) out.push(o); }); return out; };
 
   function renderFace(i) {
     const prevTarget = renderer.getRenderTarget(), prevAuto = renderer.shadowMap.autoUpdate, prevXr = renderer.xr.enabled;

@@ -15,6 +15,7 @@ import { createCarCamera, CAM_NAMES } from './car/camera.js';
 import { createSkids, createSmoke, createSparks } from './car/fx.js';
 import { createAudio } from './car/audio.js';
 import { createHud } from './car/hud.js';
+import { prepareMaterials, cloneLamp, setLamp, lampLevels } from './car/lamps.js';
 
 const DT = 1 / 120;
 const PAINTS = [['Black Sapphire', 0x07080b, 0.55], ['Toronto Red', 0xb0121c, 0.5], ['Zandvoort Blue', 0x0a3f9e, 0.5], ['Frozen Brooklyn Grey', 0x7b7f86, 0.35], ['Isle of Man Green', 0x0c6a52, 0.5], ['Sao Paulo Yellow', 0xf0c400, 0.4], ['Fire Orange', 0xe05a10, 0.5], ['Alpine White', 0xe9ebee, 0.3]];
@@ -42,21 +43,17 @@ export default async function car(ctx) {
   const entries = new Map();
   function loadEntry(id) {
     if (!entries.has(id)) entries.set(id, loader.loadAsync(CAR_PROFILES[id].file).then(gltf => {
-      const lightMats = [];
       gltf.scene.traverse(o => {
         if (!o.isMesh) return;
         o.castShadow = o.name !== 'Underbody' && o.name !== 'Interior'; o.receiveShadow = true; o.frustumCulled = true;
         const ms = Array.isArray(o.material) ? o.material : [o.material];
         ms.forEach((m, i) => {
-          const n = m.name || '';
-          if (/^paint$/i.test(n)) { if (Array.isArray(o.material)) o.material[i] = paintMat; else o.material = paintMat; return; }
-          if (/Light/i.test(n) && (m.emissiveMap || m.emissive.getHex() > 0) && !lightMats.includes(m)) lightMats.push(m);
-          if (/glass|Window/i.test(n)) { m.transparent = true; m.depthWrite = false; m.opacity = Math.min(m.opacity, 0.35); m.roughness = 0.05; m.envMapIntensity = 1.5; }
+          if (/^paint$/i.test(m.name || '')) { if (Array.isArray(o.material)) o.material[i] = paintMat; else o.material = paintMat; return; }
           if ('envMapIntensity' in m) m.envMapIntensity = Math.max(m.envMapIntensity, 1.0);
-          m.needsUpdate = true;
         });
         if (quality.level === 'low' && /Interior|SeatBelt|Engine|Underbody/i.test(o.name + (o.parent?.name ?? ''))) o.visible = false;
       });
+      const lightMats = prepareMaterials(gltf.scene);                       // lamps (head / tail split), glass, interior emissive clean-up
       return { scene: gltf.scene, lightMats };
     }));
     return entries.get(id);
@@ -84,7 +81,7 @@ export default async function car(ctx) {
   let lightsOn = true;
 
   // ------------------------------------------------------------------ systems
-  const skids = createSkids({ scene, ground }), smoke = createSmoke({ scene }), sparks = createSparks({ scene });
+  const skids = createSkids({ scene, ground }), smoke = createSmoke({ scene, ground }), sparks = createSparks({ scene });
   const audio = createAudio(), hud = createHud(), cam = createCarCamera(camera);
   const input = createInput({
     pad: (name, ok) => hud.toast(ok ? 'GAMEPAD CONNECTED' : 'GAMEPAD DISCONNECTED', 1.6),
@@ -147,6 +144,8 @@ export default async function car(ctx) {
     camRay.origin = { x: a.x, y: a.y, z: a.z }; camRay.dir = { x: dx / L, y: dy / L, z: dz / L };
     const hit = world.castRay(camRay, L, true, undefined, undefined, undefined, vehicle.body); return hit ? hit.timeOfImpact / L : 1;
   };
+  const smokeEnv = { camera, vel: vehicle.vel, light: null }, tyreHeat = [0, 0, 0, 0];
+  const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   const hudState = { beta: 0, kmh: 0, speed: 0, grounded: 4, vLong: 0, slipR: 0, wallDist: 9, crashed: false, gear: 1, rpm: 0, assist: 1, abs: true, auto: true, handbrake: 0, cam: 'CHASE' };
 
   function update(dt, camera_, time) {
@@ -168,8 +167,9 @@ export default async function car(ctx) {
       r.steer.position.y = CAR.hCOM + CAR.hpY - w.d; r.steer.rotation.y = w.steer; r.spin.rotation.x = w.spin % (Math.PI * 2);
     }
     for (const sp of heads) sp.intensity = lightsOn ? 520 * night : 0;
-    for (const m of lightMats) m.emissiveIntensity = 1.0 * (0.25 + 0.75 * night) + (vehicle.input.brake > 0.1 ? 1.5 : 0);
-    if (!active) { skids.update(); smoke.update(dt, rp, day); sparks.update(dt, ground); return; }
+    { const [lh, lt] = lampLevels(night, lightsOn, vehicle.input.brake > 0.1); for (const m of lightMats) setLamp(m, lh, lt); }
+    smokeEnv.light = tod.light;
+    if (!active) { skids.update(); smoke.update(dt, rp, day, smokeEnv); sparks.update(dt, ground); return; }
 
     totalTime += dt;
     // world colliders around the car
@@ -191,17 +191,21 @@ export default async function car(ctx) {
     const sp = vehicle.t.speed; let slipF = 0, slipR = 0, hard = 0, nc = 0, slipRum = 0;
     for (let i = 0; i < 4; i++) {
       const w = vehicle.wheels[i]; if (!w.contact) { skids.feed(i, 0, 0, 0, 0); continue; }
-      const fast = Math.min(1, Math.max(0, (sp - 8) / 12)), inten = Math.min(1, Math.max(0, (w.slipV - 2.2) / 5.5)) * Math.min(1, Math.max(0, (w.slip - 0.9) / 0.6)) * fast * fast * (3 - 2 * fast);   // smoke / marks only at speed
+      // slide / wheelspin intensity 0..1: sideways scrub at speed OR a spinning tyre (burnouts smoke and mark even from a standstill)
+      // physics: frictional power dumped into the tread = |tyre force| x sliding speed. Normal acceleration / cornering stays well under ~20 kW per tyre; a real slide or burnout is 40-100 kW.
+      const fric = Math.hypot(w.fx, w.fy) * w.slipV, slideSpd = sm(1.8, 6, w.slipV);
+      const inten = sm(14e3, 45e3, fric) * slideSpd * sm(0.5, 1.1, w.slip);                                  // skid marks: any real scrub
+      const burn = sm(40e3, 90e3, fric) * slideSpd * sm(0.7, 1.4, w.slip);                                    // smoke: needs more, and the rubber has to heat up first
+      const th = tyreHeat[i] += (burn - tyreHeat[i]) * (1 - Math.exp(-dt * (burn > tyreHeat[i] ? 2.4 : 1.6)));
       skids.feed(i, w.pcx, w.pcz, inten, w.surf); if (inten > slipRum) slipRum = inten;
-      const spinning = Math.abs(w.slipX) > 0.35;
-      smoke.emit(i, dt, w.pcx, w.pcy, w.pcz, vehicle.vel.x, vehicle.vel.z, inten * (w.surf === 0 ? 0.5 : 1) * (0.45 + 0.55 * Math.min(1, (sp + Math.abs(w.omega) * 0.34) / 14)), spinning);
+      const spinning = Math.abs(w.slipX) > 0.35 && sp < 12;
+      smoke.emit(i, dt, w.pcx, w.pcy, w.pcz, vehicle.vel.x, vehicle.vel.z, th * th * (w.surf === 0 ? 0.5 : 1), spinning);
       if (w.front) slipF = Math.max(slipF, w.slip); else slipR = Math.max(slipR, w.slip);
       hard += (w.surf === 1 || w.surf === 2 || w.surf === 3) ? 1 : 0; nc++;
     }
     hard = nc ? hard / nc : 0;
     if (input.pad.connected && (slipRum > 0.05 || vehicle.limiter)) input.rumble(0, Math.min(1, slipRum * 0.6 + (vehicle.limiter ? 0.25 : 0)));
-    skids.update(); smoke.update(dt, rp, day); sparks.update(dt, ground);
-    smoke.setScale(renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360)));
+    skids.update(); smoke.update(dt, rp, day, smokeEnv); sparks.update(dt, ground);
     sparks.setScale(renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360)));
 
     // audio + hud
@@ -228,7 +232,7 @@ export default async function car(ctx) {
       mdl = e.scene.clone(true); const ph = CAR_PROFILES[id].phys; mdl.position.set(0, -ph.hCOM, -ph.zCOM);
       mdl.traverse(o => {
         if (!o.isMesh) return;
-        const swap = m => { if (m === paintMat) return pm; if (e.lightMats.includes(m)) { let c = lms.get(m); if (!c) lms.set(m, c = m.clone()); return c; } return m; };
+        const swap = m => { if (m === paintMat) return pm; if (e.lightMats.includes(m)) { let c = lms.get(m); if (!c) lms.set(m, c = cloneLamp(m)); return c; } return m; };
         o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
       });
       rg = {}; for (const k of ['FL', 'FR', 'RL', 'RR']) rg[k] = { steer: mdl.getObjectByName('steer_' + k), spin: mdl.getObjectByName('spin_' + k) };
@@ -241,7 +245,7 @@ export default async function car(ctx) {
       /** st: { steer, wf, wr (wheel rad/s), brake } */
       update(dt, st) {
         for (const k of ['FL', 'FR', 'RL', 'RR']) { const r = rg[k]; if (!r?.spin) continue; spin[k] = (spin[k] + (k[0] === 'F' ? st.wf : st.wr) * dt) % (Math.PI * 2); r.spin.rotation.x = spin[k]; if (k[0] === 'F' && r.steer) r.steer.rotation.y = st.steer; }
-        const night = tod.night; for (const m of lms.values()) m.emissiveIntensity = 1.0 * (0.25 + 0.75 * night) + (st.brake ? 1.5 : 0);
+        const [lh, lt] = lampLevels(tod.night, true, !!st.brake); for (const m of lms.values()) setLamp(m, lh, lt);
       },
       dispose() { dead = true; scene.remove(g); pm.dispose(); for (const m of lms.values()) m.dispose(); },
     };

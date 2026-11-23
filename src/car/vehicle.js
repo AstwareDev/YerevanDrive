@@ -111,12 +111,13 @@ export class Vehicle {
     else { thr = input.throttle; brk = vLong > 0.5 ? input.brake : 0; }
     if (this.tcs && thr > 0.05 && this.gear >= 1 && vLong < 11) {          // launch traction control (below ~40 km/h): keeps the rear wheels near peak slip
       const kr = Math.max(rl0.omega, rr0.omega) * R / Math.max(vLong, 2.0) - 1;
-      thr *= sat(1 - (kr - 0.22) * 2.8, 0.18, 1);
+      const inSlide = smooth(Math.abs(Math.atan2(vLat, Math.max(vLong, 0.1))), 0.12, 0.35);       // launch control must not strangle a slide / donut that has dropped below 40 km/h
+      thr *= 1 - (1 - sat(1 - (kr - 0.22) * 2.8, 0.18, 1)) * (1 - inSlide);
     }
     if (this.steerAssist > 0 && thr > 0.05 && this.gear >= 1 && speed > 6) {   // drift assist: fade the power as the slide angle / rear wheelspin run away, so a held throttle sustains the drift instead of spinning the car
       const bAbs = Math.abs(Math.atan2(vLat, Math.max(vLong, 0.1)));
       const kr2 = (Math.max(rl0.omega, rr0.omega) * R - speed) / Math.max(speed, 6);
-      thr *= Math.max(0.15, 1 - 0.6 * smooth(bAbs, 0.75, 1.2) - 0.7 * smooth(kr2, 0.6, 1.5));
+      thr *= Math.max(0.35, 1 - 0.45 * smooth(bAbs, 0.95, 1.35) - 0.25 * smooth(kr2, 1.2, 3.0));
     }
     this.boost += ((thr > 0.3 && this.rpm > 2400 ? thr : thr * 0.35) - this.boost) * Math.min(1, dt / 0.4);
 
@@ -160,14 +161,17 @@ export class Vehicle {
     // ---------------------------------------------------------------- steering
     const maxA = this.maxSteer(speed);
     const beta = vLong > 0.8 ? Math.atan2(vLat, vLong) : 0;
-    let target = input.steer * maxA;
+    // while sliding, the player's lock is an offset around the counter-steer angle (it trims the slide), not an absolute wheel angle: a full flick the other way
+    // must not add to the counter-steer and slam the wheels to 60 degrees (that spun the car on every direction change)
+    let target = input.steer * maxA * (1 - 0.45 * smooth(Math.abs(beta), 0.2, 0.7) * this.steerAssist);
     if (this.steerAssist > 0 && vLong > 1.5 && speed > 3) {
       // auto counter-steer: point the front wheels along their own direction of travel (front axle velocity includes the yaw-rate term),
       // fading in with speed. The player's steering input is added on top, so it steers the slide instead of fighting it.
       const vyF = vLat + _ang.y * (CAR.axleF.z - CAR.zCOM);
       target += sat(Math.atan2(vyF, vLong), -0.9, 0.9) * this.steerAssist * smooth(speed, 3, 8);
     }
-    target = sat(target, -62 * Math.PI / 180, 62 * Math.PI / 180);
+    const lim = (62 - 14 * smooth(Math.abs(beta), 0.3, 0.8) * this.steerAssist) * Math.PI / 180;
+    target = sat(target, -lim, lim);
     const slew = 6.5 * dt; this.steerWheel += sat(target - this.steerWheel, -slew, slew);
     {
       const L = CAR.axleF.z - CAR.axleR.z, tw = CAR.axleF.x * 2, dlt = this.steerWheel, tn = Math.tan(Math.abs(dlt));
@@ -262,6 +266,11 @@ export class Vehicle {
       const bDes = sat(0.46 + 0.14 * into, 0.3, 0.62), act = smooth(bAbs, 0.1, 0.3), growth = -sg * _ang.y;
       const tq = this.steerAssist * act * (14000 * Math.max(0, bAbs - bDes) + 2600 * Math.max(0, growth));
       this.assistTq = sg * tq; _T.y += sg * tq;
+    }
+    // yaw-rate limiter: a drift flick the other way used to whip the car round at 3+ rad/s (a full pirouette). Past a speed-dependent ceiling the excess yaw is damped.
+    if (this.steerAssist > 0 && speed > 6 && grounded >= 2) {
+      const yl = 1.35 + 5.5 / Math.max(speed, 6), ey = Math.abs(_ang.y) - yl;
+      if (ey > 0) _T.y -= Math.sign(_ang.y) * this.steerAssist * CAR.inertia.y * 7 * ey;
     }
     // velocity-steering assist: steering input directly bends the car's direction of TRAVEL (a lateral pull perpendicular to the velocity), strongest while
     // sliding when the front tyres are saturated and the wheels alone cannot change where the car is going. Scaled by the assist level.
