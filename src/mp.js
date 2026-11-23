@@ -13,6 +13,7 @@ const CSS = `
 #mp .row{display:flex;gap:8px;align-items:center;padding:3px 8px;border-radius:8px;background:rgba(10,14,24,.55);margin-bottom:3px}
 #mp .row b{width:10px;height:10px;border-radius:50%;border:1.5px solid #fff;flex:none}
 #mp .row span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#mp .row em{font-style:normal;opacity:.65;font-size:11px}
+#mp .inv{pointer-events:auto;cursor:pointer;justify-content:center;background:rgba(30,90,60,.7)}#mp .inv:hover{background:rgba(40,130,85,.85)}
 #mp .me{pointer-events:auto;cursor:pointer}#mp .me:hover{background:rgba(40,60,110,.7)}
 .mp-tag{position:fixed;left:0;top:0;z-index:5;pointer-events:none;transform:translate(-50%,-100%);padding:2px 9px;border-radius:99px;background:rgba(10,14,24,.72);border:1px solid rgba(255,255,255,.25);color:#fff;font:600 12px system-ui,sans-serif;white-space:nowrap;display:none}
 .mp-tag small{opacity:.7;margin-left:6px;font-weight:500}
@@ -49,15 +50,37 @@ export default async function ({ THREE, drive }) {
     p.snaps.push({ t: now, a: m.a }); if (p.snaps.length > 24) p.snaps.shift();
   }
   if (qs.get('bc') !== '0') try { bc = new BroadcastChannel('yerevan-mp-' + roomName); bc.onmessage = e => handle(e.data); } catch { /* no BroadcastChannel */ }
+  // Preferred transport: a WebSocket relay (server/worker.js) - reliable for everyone, no NAT/relay luck. URL from ?ws=, VITE_MP_WS or localStorage.
+  const wsUrl = qs.get('ws') || import.meta.env?.VITE_MP_WS || localStorage.getItem('mp.ws') || '';
+  let sock = null, wsBackoff = 1000;
+  if (wsUrl && qs.get('ws') === '') localStorage.removeItem('mp.ws');
+  if (wsUrl) {
+    if (qs.get('ws')) localStorage.setItem('mp.ws', wsUrl);
+    const connect = () => {
+      try {
+        sock = new WebSocket(`${wsUrl.replace(/^http/, 'ws')}${wsUrl.includes('?') ? '&' : '?'}room=${encodeURIComponent(roomName)}`);
+        sock.onopen = () => { relayOk = true; wsBackoff = 1000; };
+        sock.onmessage = e => { try { handle(JSON.parse(e.data)); } catch { /* */ } };
+        sock.onclose = () => { sock = null; setTimeout(connect, wsBackoff); wsBackoff = Math.min(15000, wsBackoff * 2); };
+        sock.onerror = () => { try { sock.close(); } catch { /* */ } };
+      } catch { setTimeout(connect, 5000); }
+    };
+    connect();
+  }
   try {
-    const room = joinRoom({ appId: APP_ID, identity: 'none' }, 'yd-' + roomName);
+    if (wsUrl) throw new Error('using WebSocket relay');
+    const room = joinRoom({ appId: APP_ID, identity: 'none', relayConfig: { redundancy: 8 }, rtcConfig: { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] } }, 'yd-' + roomName);
     tr = room.makeAction('s');
     tr.onMessage(data => handle(data));
     room.onPeerJoin(() => { relayOk = true; });
     room.onError?.(e => console.warn('[mp] room error', e));
     addEventListener('pagehide', () => { try { room.leave(); } catch { /* */ } });
-  } catch (e) { console.warn('[mp] WebRTC transport unavailable, same-browser tabs only', e); }
-  const send = msg => { try { bc?.postMessage(msg); } catch { /* */ } try { tr?.send(msg)?.catch?.(() => { }); } catch { /* */ } };
+  } catch (e) { if (!wsUrl) console.warn('[mp] WebRTC transport unavailable, same-browser tabs only', e); }
+  const send = msg => {
+    try { bc?.postMessage(msg); } catch { /* */ }
+    if (sock?.readyState === 1) { try { sock.send(JSON.stringify(msg)); } catch { /* */ } }
+    try { tr?.send(msg)?.catch?.(() => { }); } catch { /* */ }
+  };
 
   // ------------------------------------------------------------------ per frame
   const q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), v3 = new THREE.Vector3(), fw = new THREE.Vector3();
@@ -74,9 +97,18 @@ export default async function ({ THREE, drive }) {
       h += `<div class="row"><b style="background:${col(hex[p.paint] ?? 0x888888)}"></b><span>${esc(p.name)}</span><em>${cp ? fmt(Math.hypot(p.x - cp.x, p.z - cp.z)) : ''}</em></div>`;
     }
     if (!players.size) h += `<div class="row" style="opacity:.7"><span>${relayOk || linked ? 'Waiting for other drivers…' : 'Looking for other drivers… (open the site in another tab)'}</span></div>`;
+    h += `<div class="row inv" title="${isPublic ? 'Start your own private room and copy an invite link' : 'Copy the invite link for this room'}"><span style="text-align:center">${isPublic ? 'HOST A ROOM' : 'COPY INVITE LINK'}</span></div>`;
     panel.innerHTML = h;
   }
-  panel.addEventListener('click', e => { if (!e.target.closest('.me')) return; const n = prompt('Your driver name', myName); if (n && n.trim()) { myName = n.trim().slice(0, 16); localStorage.setItem('mp.name', myName); renderPanel(); } });
+  const isPublic = !qs.get('room');
+  panel.addEventListener('click', async e => {
+    if (e.target.closest('.inv')) {
+      const code = isPublic ? Math.random().toString(36).slice(2, 8) : roomName, u = new URL(location.href); u.searchParams.set('room', code);
+      try { await navigator.clipboard.writeText(u.href); } catch { prompt('Send this link to your friends', u.href); }
+      if (isPublic) location.href = u.href;      // the host moves into the new private room; guests who open the link join it
+      else { const sp = e.target.closest('.inv').querySelector('span'); sp.textContent = 'LINK COPIED'; setTimeout(renderPanel, 1500); }
+      return;
+    } if (!e.target.closest('.me')) return; const n = prompt('Your driver name', myName); if (n && n.trim()) { myName = n.trim().slice(0, 16); localStorage.setItem('mp.name', myName); renderPanel(); } });
 
   let spectating = false;
   const sendState = () => { const dc = drive.car; if (!dc || spectating) return; const a = dc.netState().map((v, k) => k >= 3 && k <= 6 ? r4(v) : r2(v)); send({ i: myId, s: ++seq, a, n: myName, p: dc.paint(), c: dc.carId() }); };

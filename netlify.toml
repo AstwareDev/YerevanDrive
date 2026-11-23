@@ -1,4 +1,4 @@
-# Netlify: static site (Vite build). Multiplayer is serverless WebRTC (Trystero) so no functions / websockets are needed.
+# Netlify: static site (Vite build). Multiplayer: WebSocket relay on Cloudflare (server/worker.js), URL via VITE_MP_WS env var; falls back to WebRTC (Trystero).
 [build]
   command = "npm run build"
   publish = "dist"
