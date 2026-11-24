@@ -91,12 +91,7 @@ export default async function ({ THREE, camera, drive }) {
       <div class="keys"><kbd>↑</kbd><kbd>↓</kbd> navigate <kbd>↵</kbd> select <kbd>Esc</kbd> back</div></div>
     <div class="scr" id="s-play"><div class="brand">Play</div><div class="menu" id="playmenu"></div>
       <div class="keys"><kbd>Tab</kbd> switch driver / spectator any time · <kbd>Esc</kbd> back</div></div>
-    <div class="scr" id="s-garage"><div class="panel r"><h2>Garage</h2><div class="sub">Your ride</div>
-      <div class="scroll"><div class="lbl" style="margin-top:0">Vehicle</div><div class="cards" id="g-cars"></div>
-        <div class="lbl">Paint</div><div class="grid" id="g-paint"></div><div class="pname" id="g-pname"></div>
-        <div class="lbl">Headlights</div><div class="seg" id="g-lights" style="display:inline-flex"><span data-v="1">On</span><span data-v="0">Off</span></div></div>
-      <div><div class="btn" id="g-back">← Back</div></div></div>
-      <div class="keys" style="left:56px;right:auto;text-align:left">Drag to rotate · scroll to zoom</div></div>
+    <div class="scr" id="s-garage"></div>
     <div class="scr" id="s-settings"><div class="panel l"><h2>Settings</h2><div class="sub">Preferences are saved on this device</div>
       <div class="scroll" id="set-rows"></div><div><div class="btn" id="set-back">← Back</div></div></div></div>`;
   document.body.appendChild(root);
@@ -111,7 +106,7 @@ export default async function ({ THREE, camera, drive }) {
     if (SET.bloom !== null) y.bloom.enabled = SET.bloom === '1';
     if (SET.tod !== null) y.setTod(+SET.tod);
     if (SET.wet !== null) y.wetness.value = +SET.wet;
-    if (SET.sound !== null) drive.car?.audio?.mute(SET.sound === '0');
+    if (SET.sound !== null) { drive.car?.audio?.mute(SET.sound === '0'); drive.heli?.mute(SET.sound === '0'); }
     y.showFps?.(SET.fps !== '0');
   }
   function setSetting(k, v) { SET[k] = String(v); LS.set('yd.' + k, String(v)); applySettings(); }
@@ -128,13 +123,14 @@ export default async function ({ THREE, camera, drive }) {
     state = s;
     for (const [k, el] of Object.entries(screens)) el.classList.toggle('on', k === s);
     const menuOpen = s in screens;
-    root.classList.toggle('on', menuOpen); root.classList.toggle('solid', s === 'nick'); root.classList.toggle('right', s === 'garage');
-    $('yd-drag').classList.toggle('on', s === 'garage');
+    root.classList.toggle('on', menuOpen && s !== 'garage'); root.classList.toggle('solid', s === 'nick');
     document.body.classList.toggle('yd-menu', menuOpen);
     document.body.classList.toggle('yd-play', s === 'play-driver');
     document.body.classList.toggle('yd-spec', s === 'spec');
     if (menuOpen) { drive.uiLock = true; enterCustomCam(); } else drive.uiLock = false;
-    if (s === 'main') renderMain(); if (s === 'play') renderPlay(); if (s === 'garage') renderGarage(); if (s === 'settings') renderSettings();
+    if (s === 'main') renderMain(); if (s === 'play') renderPlay(); if (s === 'settings') renderSettings();
+    if (s === 'garage') drive.garage?.open({ onClose: () => { if (state === 'garage') show(prev); } }); else if (drive.garage?.isOpen) drive.garage.close();
+    drive.heli?.setActive(s === 'play-driver' && drive.kind === 'heli');
     if (s === 'nick') setTimeout(() => $('nick-in').focus(), 50);
   }
 
@@ -142,9 +138,9 @@ export default async function ({ THREE, camera, drive }) {
   const cs = { az: 0.6, dist: 12, h: 3.6, side: 2.6, tdist: 12, th: 3.6, tside: 2.6, drag: 0, tgt: new THREE.Vector3(), look: new THREE.Vector3(), right: new THREE.Vector3(), seeded: false };
   function enterCustomCam() { drive.setMode?.('custom'); }
   drive.camUpdate = (dt, cam) => {
-    const v = cars()?.vehicle; if (v) cs.tgt.set(v.pos.x, v.pos.y + 0.7, v.pos.z);
+    const heliOn = drive.kind === 'heli' && drive.heli?.spawned, v = heliOn ? { pos: drive.heli.pos } : cars()?.vehicle; if (v) cs.tgt.set(v.pos.x, v.pos.y + (heliOn ? 1.5 : 0.7), v.pos.z);
     const garage = state === 'garage';
-    cs.tdist = garage ? 6.4 * cs.zoom : 11; cs.th = garage ? 1.7 : 3.4; cs.tside = garage ? 1.9 : -3.0;     // garage panel is on the right -> car sits left of centre; main menu is left -> car right
+    cs.tdist = garage ? 6.4 * cs.zoom : heliOn ? 30 : 11; cs.th = garage ? 1.7 : 3.4; cs.tside = garage ? 1.9 : -3.0;     // garage panel is on the right -> car sits left of centre; main menu is left -> car right
     if (!garage) cs.az += dt * 0.11; else if (!cs.dragging) cs.az += dt * 0.05;
     const k = 1 - Math.exp(-dt * 4); cs.dist += (cs.tdist - cs.dist) * k; cs.h += (cs.th - cs.h) * k; cs.side += (cs.tside - cs.side) * k;
     const s = Math.sin(cs.az), c = Math.cos(cs.az);
@@ -178,7 +174,7 @@ export default async function ({ THREE, camera, drive }) {
     mainList.push({ label: 'Play', go: () => show('play') }, { label: 'Garage', go: () => { prev = 'main'; show('garage'); } }, { label: 'Settings', go: () => { prev = 'main'; show('settings'); } });
     mainSel = Math.min(mainSel, mainList.length - 1);
     markMain = items($('mainmenu'), mainList, 'main', i => { mainSel = i; });
-    $('m-nick').textContent = nickname;
+    $('m-nick').textContent = nickname + (drive.kind === 'heli' && drive.heli ? '  ·  ' + drive.heli.specs.name : '');
     const hex = cars()?.paints?.[cars().paint()]?.hex ?? 0xffffff; $('m-dot').style.background = hex6(hex);
     const n = drive.mp?.count; $('m-online').textContent = n === undefined ? '' : `· ${n + 1} online`;
   }
@@ -192,10 +188,12 @@ export default async function ({ THREE, camera, drive }) {
   function startPlay(role) {
     session = role; $('nick-in').blur(); cars()?.audio?.resume?.();
     if (role === 'driver') {
-      show('play-driver'); cars()?.setVisible(true); drive.mp?.setSpectating(false); drive.camUpdate = menuCam; drive.setMode('drive'); drive.uiLock = false;
-      cars()?.hud?.toast?.('DRIVER  ·  TAB spectator  ·  ESC menu', 2.2);
+      const heli = drive.kind === 'heli' && drive.heli;
+      cars()?.setVisible(!heli); drive.heli?.setVisible(!!heli); drive.mp?.setSpectating(false);
+      if (heli) { show('play-driver'); drive.camUpdate = drive.heli.camUpdate; drive.setMode('custom'); drive.uiLock = false; }
+      else { show('play-driver'); drive.camUpdate = menuCam; drive.setMode('drive'); drive.uiLock = false; cars()?.hud?.toast?.('DRIVER  ·  TAB spectator  ·  ESC menu', 2.2); }
     } else {
-      show('spec'); cars()?.setVisible(false); drive.mp?.setSpectating(true);
+      show('spec'); cars()?.setVisible(false); drive.heli?.setVisible(false); drive.mp?.setSpectating(true);
       const v = cars()?.vehicle; if (v) { camera.position.set(v.pos.x + 22, v.pos.y + 20, v.pos.z + 34); camera.lookAt(v.pos.x, v.pos.y + 2, v.pos.z); }
       sp.follow = -1; drive.camUpdate = specCam; drive.setMode('fly'); drive.uiLock = false; renderSpec();
     }
@@ -229,19 +227,6 @@ export default async function ({ THREE, camera, drive }) {
     spec.innerHTML = `<div class="pill">Spectating · <b>${p ? esc(p.name) : 'free camera'}</b></div>
       <div class="tip">${msg ? esc(msg) + ' · ' : ''}<kbd>[</kbd> <kbd>]</kbd> follow player &nbsp; <kbd>V</kbd> free camera &nbsp; <kbd>WASD</kbd> fly &nbsp; <kbd>Tab</kbd> become driver &nbsp; <kbd>Esc</kbd> menu</div>`;
   }
-
-  // ------------------------------------------------------------------ garage
-  function renderGarage() {
-    const c = cars(); if (!c) return;
-    $('g-cars').innerHTML = c.cars.map(k => `<div class="card${k.id === c.carId() ? ' on' : ''}" data-id="${k.id}"><div><b>${esc(k.name)}</b><small>${esc(k.sub)}</small></div><span>${k.id === c.carId() ? 'Selected' : 'Select'}</span></div>`).join('');
-    [...$('g-cars').children].forEach(n => n.onclick = async () => { if (n.dataset.id === c.carId()) return; n.querySelector('span').textContent = 'Loading…'; await c.setCar(n.dataset.id); LS.set('yd.car', c.carId()); renderGarage(); });
-    const cur = c.paint();
-    $('g-paint').innerHTML = c.paints.map((p, i) => `<div class="sw${i === cur ? ' on' : ''}" data-i="${i}" title="${esc(p.name)}" style="background:${hex6(p.hex === 0x07080b ? 0x15161a : p.hex)}"></div>`).join('');
-    $('g-pname').textContent = c.paints[cur].name;
-    [...$('g-paint').children].forEach(n => n.onclick = () => { const i = +n.dataset.i; c.setPaint(i); LS.set('yd.paint', String(i)); renderGarage(); });
-    const lit = c.lights() ? '1' : '0'; [...$('g-lights').children].forEach(n => { n.classList.toggle('on', n.dataset.v === lit); n.onclick = () => { c.setLights(n.dataset.v === '1'); renderGarage(); }; });
-  }
-  $('g-back').onclick = () => show(prev);
 
   // ------------------------------------------------------------------ settings
   function renderSettings() {
@@ -292,6 +277,7 @@ export default async function ({ THREE, camera, drive }) {
       return;
     }
     e.stopImmediatePropagation();
+    if (state === 'garage') { drive.garage?.key(e); return; }                  // the garage (src/garage.js) owns its keys
     const inField = e.target?.closest?.('input');
     if (state === 'nick') { if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); submitNick(); } return; }
     if (inField) { if (e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); inField.blur(); } return; }

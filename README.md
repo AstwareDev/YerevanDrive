@@ -79,12 +79,18 @@ npm run build:all  # re-bake all map data (only needed if you change the data or
 - **Real city, real streets.** Republic Square and its surroundings from OpenStreetMap, real terrain heights and aerial photo textures. The detailed area runs from Republic Square to Marshal Baghramyan Ave, Orbeli Brothers St, Barekamutyun metro and Komitas Ave, and the rest of Yerevan is streamed as distant LOD tiles out to the horizon.
 - **Hand-modelled landmarks.** Government House with the clock tower, History Museum and National Gallery, the singing fountains, Northern Avenue, the Opera House and St Gregory Cathedral, plus procedural facades along Orbeli and Komitas.
 - **Drift car.** Rapier handles collisions; the tyres, engine, gearbox and assists are our own physics. Three garage cars (BMW G87 M2 widebody, McLaren P1, Lamborghini Countach), paints, four cameras, gamepad with rumble, drift scoring.
+- **Showroom garage.** The menu's Garage opens a dedicated warehouse hall (`src/garage.js`): a centred switcher for the cars and the helicopter, and on the left paint (8 swatches + any colour), finish (gloss / metal / satin / matte), headlights, showroom lighting, turntable and performance stats. Everything is remembered between visits.
+- **Flyable helicopter.** Pick the Sikorsky SH-60B Seahawk in the garage and press Play. Own flight model (`src/heli/flight.js`: rotor thrust, ground effect, translational lift, drag, torque reaction, wheel contacts), collisions with the buildings, rotor strikes, three cameras, a flight HUD with artificial horizon, procedural rotor audio and an assisted / raw flight mode. `npm run sim:heli` flies it headless.
 - **Day, dusk and night.** Wet or dry asphalt, neon, street-lamp light, a night sky with Ararat on the horizon and volumetric clouds you can fly through.
 - **Ultra graphics, scalable down.** Ambient occlusion, screen-space plus ray-traced reflections, a live reflection probe and tile batching. Four quality presets and a governor that lowers settings when the frame rate drops, so it also runs on weak PCs.
 - **GPS navigator.** Press <kbd>F</kbd> for a map with address and place search, turn-by-turn guidance, a minimap and voice prompts.
 - **Multiplayer without a server.** Peer-to-peer WebRTC (ghost cars, name tags, online list) that works on a static host.
 
 ## Controls
+
+**Helicopter** (when the Seahawk is the selected vehicle): <kbd>W</kbd><kbd>S</kbd> cyclic pitch · <kbd>A</kbd><kbd>D</kbd> bank · <kbd>Q</kbd><kbd>E</kbd> (or <kbd>←</kbd><kbd>→</kbd>) yaw pedals · <kbd>Space</kbd>/<kbd>↑</kbd> climb · <kbd>Shift</kbd>/<kbd>↓</kbd> descend · <kbd>I</kbd> engine · <kbd>G</kbd> flight assist / raw · <kbd>L</kbd> lights · <kbd>C</kbd> camera · <kbd>R</kbd> respawn. Gamepad: left stick yaw + climb, right stick cyclic.
+
+**Car:**
 
 | Key | Action |
 |---|---|

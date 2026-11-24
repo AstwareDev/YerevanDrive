@@ -188,9 +188,9 @@ if (quality.fx) { sceneFx = new SceneFXPass({ camera, depthTexture: depthTex, he
 if (sceneFx?.rt) initRTWorld({ heightGrid: heightAt.grid }).catch(e => console.warn('rt world unavailable', e));   // background bake
 const pluginUpdates = [];       // { path, update }
 // shared with the car plug-in (src/car.js): drive mode takes over the camera, `focus` feeds the shadow frustum / lamp lights
-const drive = { active: false, wanted: false, uiLock: false, focus: new THREE.Vector3(), set(v) { setMode(v ? 'drive' : 'orbit'); } };
+const drive = { active: false, wanted: false, uiLock: false, kind: 'car', streamPos: null, lampLights: null, focus: new THREE.Vector3(), set(v) { setMode(v ? 'drive' : 'orbit'); } };
 {
-  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js', './mp.js', './menu.js', './orbeli.js']);
+  const found = import.meta.glob(['./landmarks.js', './props.js', './circuits.js', './car.js', './nav.js', './mp.js', './menu.js', './garage.js', './heli.js', './orbeli.js']);
   const wantCircuits = new URLSearchParams(location.search).get('circuits') === '1';     // the race circuits are off by default: free roam (?circuits=1 restores them)
   // The plug-ins used to initialise one after the other (each one: import, download, parse, build). Their downloads and module loads now overlap:
   // phase 1 = everything that does not need the car (world dressing + the big car module itself, 4 MB of WASM), phase 2 = what talks to the car.
@@ -200,7 +200,7 @@ const drive = { active: false, wanted: false, uiLock: false, focus: new THREE.Ve
     catch (e) { console.error('plugin failed', path, e); }
   };
   const entries = Object.entries(found).filter(([p]) => !(p.endsWith('circuits.js') && !wantCircuits));
-  const carDeps = /\/(menu|mp|nav)\.js$/, late = /\/nav\.js$/;
+  const carDeps = /\/(menu|mp|nav|garage|heli)\.js$/, late = /\/nav\.js$/;
   await Promise.all(entries.filter(([p]) => !carDeps.test(p)).map(([p, l]) => run(p, l)));
   await Promise.all(entries.filter(([p]) => carDeps.test(p) && !late.test(p)).map(([p, l]) => run(p, l)));
   // the map / GPS (1.4 MB graph + 18 k nodes to index) is not needed to start driving: it finishes behind the loading screen
@@ -241,6 +241,7 @@ function applyTod(d) {
 const POOL = quality.lights, lampLights = [];
 for (let i = 0; i < POOL; i++) { const l = new THREE.PointLight(0xffb36b, 0, 34, 2); scene.add(l); lampLights.push(l); }
 const focus = new THREE.Vector3();
+drive.lampLights = lampLights;       // the garage (src/garage.js) takes the pooled lamp lights over for its ceiling lamps
 const LCELL = 48; let lampGrid = null, lampGridN = -1;
 const nearD = new Float64Array(POOL), nearI = new Int32Array(POOL);
 function updateLampLights() {
@@ -432,7 +433,7 @@ renderer.setAnimationLoop(() => {
   pm('shadow');
   governor.update(dt, cpuMs);
   pm('governor');
-  streamer.update(camera.position);
+  streamer.update(drive.streamPos ?? camera.position);        // the garage sits far outside the map: keep streaming around the real player
   pm('streamer');
   sky.position.copy(camera.position); sky.material.uniforms.uTime.value = clock.elapsedTime;
   if (clock.elapsedTime - statT > 1) { statT = clock.elapsedTime; $('stats').textContent = `${gpuName} · ${(streamer.stat.tris / 1e6).toFixed(2)}M tris · ${streamer.stat.shown} tiles shown · ${streamer.stat.loaded} loaded · q=${quality.level}${governor.level ? '-' + governor.level : ''}${(b => b ? ` · ${b.fps} fps (1% low ${b.low1}) · x${renderer.getPixelRatio().toFixed(2)}` : '')(benchStats())}`; }

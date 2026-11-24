@@ -67,8 +67,8 @@ export default async function car(ctx) {
     for (const k of ['FL', 'FR', 'RL', 'RR']) rig[k] = { steer: model.getObjectByName('steer_' + k), spin: model.getObjectByName('spin_' + k) };
   }
   mountModel(await loadEntry(carId));
-  let paintIdx = 2;
-  function applyPaint(i) { paintIdx = (i + PAINTS.length) % PAINTS.length; const [, c, m] = PAINTS[paintIdx]; paintMat.color.setHex(c).convertSRGBToLinear(); paintMat.metalness = m; }
+  let paintIdx = 2, customHex = null, finishId = 'gloss', metalK = 1;       // customHex: garage colour picker (null = one of the PAINTS swatches)
+  function applyPaint(i) { customHex = null; paintIdx = (i + PAINTS.length) % PAINTS.length; const [, c, m] = PAINTS[paintIdx]; paintMat.color.setHex(c).convertSRGBToLinear(); paintMat.metalness = Math.min(1, m * metalK); }
   applyPaint(paintIdx);
 
   // headlights (spot lights, ground-reflection and facade lighting at night)
@@ -126,6 +126,8 @@ export default async function car(ctx) {
 
   // ------------------------------------------------------------------ per-frame
   const rp = new THREE.Vector3(), rq = new THREE.Quaternion(), tmpV = new THREE.Vector3();
+  // garage showcase (src/garage.js): the car model is shown on the turntable of the garage hall while the physics body stays parked in the world
+  const UP = new THREE.Vector3(0, 1, 0), show = { on: false, x: 0, y: 0, z: 0, yaw: 0, scale: 1, rest: 0.5 };
   let acc = 0, collT = 0, wallT = 0, wallDist = 9, lastSpark = 0, crashed = false, totalTime = 0;
   const wallRay = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 });
   function pollWalls() {
@@ -160,7 +162,8 @@ export default async function car(ctx) {
     }
     vehicle.transform(Math.min(1, acc / DT), rp, rq);
     root.position.copy(rp); root.quaternion.copy(rq);
-    const day = tod.day, night = tod.night;
+    if (show.on) { root.position.set(show.x, show.y + show.rest, show.z); root.quaternion.setFromAxisAngle(UP, show.yaw); root.scale.setScalar(show.scale); } else if (root.scale.x !== 1) root.scale.setScalar(1);
+    const day = tod.day, night = show.on ? Math.max(tod.night, 0.6) : tod.night;      // garage: lamps always glow
     // wheels
     for (const w of vehicle.wheels) {
       const r = rig[w.key]; if (!r.steer) continue;
@@ -264,10 +267,22 @@ export default async function car(ctx) {
     } finally { switching = false; }
     return true;
   }
+  function showcase(on, o) {
+    if (on && !show.on) { const v = vehicle, upright = v.grounded >= 3 && v.up.y > 0.95; show.rest = upright ? Math.max(0.3, v.pos.y - ground.y(v.pos.x, v.pos.z)) : CAR.hCOM; }
+    show.on = !!on; if (o) Object.assign(show, o);
+  }
+  // finish presets for the shared paint material (garage > Finish): metalness is scaled per paint, the rest is absolute
+  const FINISH = { gloss: { k: 1, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.04 }, metallic: { k: 1.8, roughness: 0.22, clearcoat: 0.85, clearcoatRoughness: 0.05 }, satin: { k: 0.8, roughness: 0.5, clearcoat: 0.25, clearcoatRoughness: 0.35 }, matte: { k: 0.3, roughness: 0.85, clearcoat: 0, clearcoatRoughness: 0.6 } };
+  function setPaintHex(hex) { customHex = hex; paintMat.color.setHex(hex).convertSRGBToLinear(); paintMat.metalness = Math.min(1, 0.55 * metalK); }
+  function setFinish(id) {
+    const f = FINISH[id]; if (!f) return; finishId = id; metalK = f.k; const { roughness, clearcoat, clearcoatRoughness } = f; Object.assign(paintMat, { roughness, clearcoat, clearcoatRoughness }); paintMat.needsUpdate = true;
+    if (customHex !== null) setPaintHex(customHex); else applyPaint(paintIdx);
+  }
   drive.pad = input.pad;       // gamepad state for the map (stick pans, triggers zoom)
   drive.car = {
     vehicle, ground, hud, makeRemote, setCar, carId: () => carId, cars: CAR_IDS.map(id => ({ id, name: CAR_PROFILES[id].name, sub: CAR_PROFILES[id].sub })), carName: id => CAR_PROFILES[id]?.name ?? '', paint: () => paintIdx, setPaint: applyPaint, paints: PAINTS.map(([name, hex]) => ({ name, hex })), setVisible: v => { root.visible = v; }, setLights: v => { lightsOn = v; }, audio, paintHex: PAINTS.map(p => p[1]), lights: () => lightsOn,
     teleport: (x, z, heading) => respawn({ x, z, y: null, heading }),
+    showcase, setFinish, setPaintHex, finish: () => finishId, customHex: () => customHex, paintMat, heads, root, placeHeads, world, RAPIER, colliders, spawn: () => ({ ...spawn }), profile: id => CAR_PROFILES[id],
     /** local car net state: [x,y,z, qx,qy,qz,qw, vx,vy,vz, steer, wheelF, wheelR, brake] */
     netState: () => { const p = vehicle.pos, q = vehicle.quat, v = vehicle.vel; return [p.x, p.y, p.z, q.x, q.y, q.z, q.w, v.x, v.y, v.z, (vehicle.wheels[0].steer + vehicle.wheels[1].steer) / 2, wheelAvg(true), wheelAvg(false), vehicle.input.brake > 0.1 ? 1 : 0]; },
   };       // public API for the map / navigator (src/nav.js)
